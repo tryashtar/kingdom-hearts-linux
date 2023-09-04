@@ -4,14 +4,21 @@ import zipfile
 import shutil
 import os
 import subprocess
+import datetime
+import tomlkit
 
 def main():
-   settings = get_settings(os.path.join(os.path.dirname(__file__), 'settings.json'))
+   settings_path = os.path.join(os.path.dirname(__file__), 'settings.json')
+   settings = get_settings(settings_path)
+   if 'downloads' not in settings:
+      settings['downloads'] = {}
    print('Starting!')
    symlinks = {}
 
    if (wineprefix := settings.get('wineprefix')) is not None:
-      subprocess.run('wineboot', env=dict(os.environ, WINEPREFIX=wineprefix))
+      if not os.path.exists(wineprefix):
+         print('Initializing wineprefix')
+         subprocess.run('wineboot', env=dict(os.environ, WINEPREFIX=wineprefix))
       user_folder = os.path.join(wineprefix, 'drive_c/users', os.getlogin())
       symlinks[os.path.join(user_folder, 'Documents')] = None
       symlinks[os.path.join(user_folder, 'Documents/Kingdom Hearts/Configuration/1638')] = None
@@ -38,112 +45,181 @@ def main():
             symlinks[os.path.join(user_folder, 'Documents/KINGDOM HEARTS Melody of Memory/Epic Games Store')] = (save, True)
    
    backup_vanilla = False
-   if (kh_folder := settings['installs'].get('kh1.5+2.5')) is not None:
-      epic_folder = os.path.join(kh_folder, 'EPIC')
+   kh15_folder = settings['installs'].get('kh1.5+2.5')
+   kh28_folder = settings['installs'].get('kh2.8')
+   if kh15_folder is not None:
+      epic_folder = os.path.join(kh15_folder, 'EPIC')
       if os.path.exists(epic_folder) and len(os.listdir(epic_folder)) > 0:
-         print('Renaming EPIC folder to EPIC.bak to prevent crashes during FMVs')
-         os.rename(epic_folder, os.path.join(kh_folder, 'EPIC.bak'))
-      symlinks[os.path.join(kh_folder, 'x64')] = None
-      symlinks[os.path.join(kh_folder, 'Keystone.Net.dll')] = None
-      symlinks[os.path.join(kh_folder, 'KINGDOM HEARTS II FINAL MIX.exe')] = None
-      symlinks[os.path.join(kh_folder, 'reFined.ini')] = None
-      symlinks[os.path.join(kh_folder, 'version.dll')] = None
-      symlinks[os.path.join(kh_folder, 'panacea_settings.txt')] = None
-      symlinks[os.path.join(kh_folder, 'DINPUT8.dll')] = None
-      symlinks[os.path.join(kh_folder, 'lua54.dll')] = None
-      symlinks[os.path.join(kh_folder, 'LuaBackend.toml')] = None
+         print('Renaming KH 1.5+2.5 EPIC folder to EPIC.bak to prevent crashes during FMVs')
+         os.rename(epic_folder, os.path.join(kh15_folder, 'EPIC.bak'))
+      symlinks[os.path.join(kh15_folder, 'x64')] = None
+      symlinks[os.path.join(kh15_folder, 'Keystone.Net.dll')] = None
+      symlinks[os.path.join(kh15_folder, 'KINGDOM HEARTS II FINAL MIX.exe')] = None
+      symlinks[os.path.join(kh15_folder, 'reFined.ini')] = None
+      symlinks[os.path.join(kh15_folder, 'version.dll')] = None
+      symlinks[os.path.join(kh15_folder, 'panacea_settings.txt')] = None
+      symlinks[os.path.join(kh15_folder, 'DINPUT8.dll')] = None
+      symlinks[os.path.join(kh15_folder, 'lua54.dll')] = None
+      symlinks[os.path.join(kh15_folder, 'LuaBackend.toml')] = None
+   if kh28_folder is not None:
+      epic_folder = os.path.join(kh28_folder, 'EPIC')
+      if os.path.exists(epic_folder) and len(os.listdir(epic_folder)) > 0:
+         print('Renaming KH 2.8 EPIC folder to EPIC.bak to prevent crashes during FMVs')
+         os.rename(epic_folder, os.path.join(kh28_folder, 'EPIC.bak'))
+      symlinks[os.path.join(kh28_folder, 'version.dll')] = None
+      symlinks[os.path.join(kh28_folder, 'panacea_settings.txt')] = None
+      symlinks[os.path.join(kh28_folder, 'DINPUT8.dll')] = None
+      symlinks[os.path.join(kh28_folder, 'lua54.dll')] = None
+      symlinks[os.path.join(kh28_folder, 'LuaBackend.toml')] = None
    
-      if (mods_folder := settings['mods'].get('folder')) is not None:
-         if (mod_folder := settings['mods'].get('refined')) is not None:
-            print('Downloading ReFined...')
-            rq = requests.get('https://api.github.com/repos/TopazTK/KH-ReFined/releases')
-            if rq.status_code != 200:
-               print(f'Error {rq.status_code}!')
-               try:
-                  print(json.loads(rq.text)['message'])
-               except:
-                  print(rq.text)
-            else:
-               release = json.loads(rq.text)[0]
+   if (mods_folder := settings['mods'].get('folder')) is not None:
+      if (mod_folder := settings['mods'].get('refined')) is not None:
+         print('Checking for ReFined updates...')
+         date = settings['downloads'].get('refined')
+         if date is not None:
+            date = datetime.datetime.fromisoformat(date)
+         rq = requests.get('https://api.github.com/repos/TopazTK/KH-ReFined/releases')
+         if rq.status_code != 200:
+            print(f'Error {rq.status_code}!')
+            try:
+               print(json.loads(rq.text)['message'])
+            except:
+               print(rq.text)
+         else:
+            newest = None
+            for release in json.loads(rq.text):
                for asset in release['assets']:
                   if asset['name'].endswith('.zip'):
-                     print(f'Got version {release["tag_name"]}')
-                     rq = requests.get(asset['browser_download_url'])
-                     with open('/tmp/refined.zip', 'wb') as file:
-                        file.write(rq.content)
-                     with zipfile.ZipFile('/tmp/refined.zip', 'r') as zip:
-                        zip.extractall(mod_folder)
-            if os.path.exists(mod_folder):
-               symlinks[os.path.join(kh_folder, 'x64')] = (os.path.join(mod_folder, 'x64'), True)
-               symlinks[os.path.join(kh_folder, 'Keystone.Net.dll')] = (os.path.join(mod_folder, 'Keystone.Net.dll'), False)
-               symlinks[os.path.join(kh_folder, 'KINGDOM HEARTS II FINAL MIX.exe')] = (os.path.join(mod_folder, 'KINGDOM HEARTS II FINAL MIX.exe'), False)
-               symlinks[os.path.join(kh_folder, 'reFined.ini')] = (os.path.join(mods_folder, 'reFined.ini'), False)
-               backup_vanilla = True
-
-         if (mod_folder := settings['mods'].get('openkh')) is not None:
-            print('Downloading OpenKh...')
-            rq = requests.get('https://api.github.com/repos/OpenKH/OpenKh/releases/tags/latest')
-            if rq.status_code != 200:
-               print(f'Error {rq.status_code}!')
-               try:
-                  print(json.loads(rq.text)['message'])
-               except:
+                     asset_date = datetime.datetime.fromisoformat(asset['updated_at'])
+                     if newest is None or asset_date > newest[0]:
+                        newest = (asset_date, release, asset)
+            if newest is not None and (date is None or newest[0] > date):
+               print(f'Downloading update: {newest[1]["tag_name"]}')
+               rq = requests.get(newest[2]['browser_download_url'])
+               if rq.status_code != 200:
+                  print(f'Error {rq.status_code}!')
                   print(rq.text)
-            else:
-               for asset in json.loads(rq.text)['assets']:
-                  if asset['name'] == 'openkh.zip':
+               else:
+                  with open('/tmp/refined.zip', 'wb') as file:
+                     file.write(rq.content)
+                  with zipfile.ZipFile('/tmp/refined.zip', 'r') as zip:
+                     zip.extractall(mod_folder)
+                  settings['downloads']['refined'] = newest[0].isoformat()
+         if os.path.exists(mod_folder) and kh15_folder is not None:
+            symlinks[os.path.join(kh15_folder, 'x64')] = (os.path.join(mod_folder, 'x64'), True)
+            symlinks[os.path.join(kh15_folder, 'Keystone.Net.dll')] = (os.path.join(mod_folder, 'Keystone.Net.dll'), False)
+            symlinks[os.path.join(kh15_folder, 'KINGDOM HEARTS II FINAL MIX.exe')] = (os.path.join(mod_folder, 'KINGDOM HEARTS II FINAL MIX.exe'), False)
+            symlinks[os.path.join(kh15_folder, 'reFined.ini')] = (os.path.join(mods_folder, 'reFined.ini'), False)
+            backup_vanilla = True
+
+      if (mod_folder := settings['mods'].get('openkh')) is not None:
+         print('Checking for OpenKH updates...')
+         date = settings['downloads'].get('openkh')
+         if date is not None:
+            date = datetime.datetime.fromisoformat(date)
+         rq = requests.get('https://api.github.com/repos/OpenKH/OpenKh/releases/tags/latest')
+         if rq.status_code != 200:
+            print(f'Error {rq.status_code}!')
+            try:
+               print(json.loads(rq.text)['message'])
+            except:
+               print(rq.text)
+         else:
+            release = json.loads(rq.text)
+            for asset in release['assets']:
+               if asset['name'] == 'openkh.zip':
+                  asset_date = datetime.datetime.fromisoformat(asset['updated_at'])
+                  if date is None or asset_date > date:
+                     print(f'Downloading update: {release["tag_name"]}')
                      rq = requests.get(asset['browser_download_url'])
-                     with open('/tmp/openkh.zip', 'wb') as file:
-                        file.write(rq.content)
-                     with zipfile.ZipFile('/tmp/openkh.zip', 'r') as zip:
-                        zip.extractall('/tmp/openkh')
-                     with open('/tmp/openkh/openkh/openkh-release', 'r') as new_file:
-                        new = new_file.read()
-                     if os.path.exists(os.path.join(mod_folder, 'openkh-release')):
-                        with open(os.path.join(mod_folder, 'openkh-release'), 'r') as existing_file:
-                           existing = existing_file.read()
+                     if rq.status_code != 200:
+                        print(f'Error {rq.status_code}!')
+                        print(rq.text)
                      else:
-                        existing = '(none)'
-                     if new != existing:
-                        print(f'Updating from version {existing} to {new}')
+                        with open('/tmp/openkh.zip', 'wb') as file:
+                           file.write(rq.content)
+                        with zipfile.ZipFile('/tmp/openkh.zip', 'r') as zip:
+                           zip.extractall('/tmp/openkh')
                         shutil.copytree('/tmp/openkh/openkh', mod_folder, dirs_exist_ok=True)
-            if os.path.exists(mod_folder):
-               if settings['mods'].get('panacea'):
-                  symlinks[os.path.join(kh_folder, 'version.dll')] = (os.path.join(mod_folder, 'OpenKH.Panacea.dll'), False)
-                  symlinks[os.path.join(kh_folder, 'panacea_settings.txt')] = (os.path.join(mods_folder, 'panacea_settings.txt'), False)
-               mod_dir = os.path.join(mods_folder, 'Mods')
-               os.makedirs(mod_dir, exist_ok=True)
-               symlinks[os.path.join(mod_folder, 'mods')] = (mod_dir, True)
+                        settings['downloads']['openkh'] = asset_date.isoformat()
+                     break
+         if os.path.exists(mod_folder):
+            if settings['mods'].get('panacea'):
+               if kh15_folder is not None:
+                  symlinks[os.path.join(kh15_folder, 'version.dll')] = (os.path.join(mod_folder, 'OpenKH.Panacea.dll'), False)
+                  symlinks[os.path.join(kh15_folder, 'panacea_settings.txt')] = (os.path.join(mods_folder, 'panacea_settings.txt'), False)
+               if kh28_folder is not None:
+                  symlinks[os.path.join(kh28_folder, 'version.dll')] = (os.path.join(mod_folder, 'OpenKH.Panacea.dll'), False)
+                  symlinks[os.path.join(kh28_folder, 'panacea_settings.txt')] = (os.path.join(mods_folder, 'panacea_settings.txt'), False)
+            mod_dir = os.path.join(mods_folder, 'Mods')
+            os.makedirs(mod_dir, exist_ok=True)
+            symlinks[os.path.join(mod_folder, 'mods')] = (mod_dir, True)
 
-         if (mod_folder := settings['mods'].get('luabackend')) is not None:
-            print('LuaBackend...')
-            toml_user = os.path.join(mods_folder, 'LuaBackend.toml')
-            rq = requests.get('https://api.github.com/repos/Sirius902/LuaBackend/releases/latest')
-            if rq.status_code != 200:
-               print(f'Error {rq.status_code}!')
-               try:
-                  print(json.loads(rq.text)['message'])
-               except:
-                  print(rq.text)
-            else:
-               release = json.loads(rq.text)
-               for asset in release['assets']:
-                  if asset['name'] == 'DBGHELP.zip':
-                     print(f'Got version {release["tag_name"]}')
+      if (mod_folder := settings['mods'].get('luabackend')) is not None:
+         print('Checking for LuaBackend updates...')
+         date = settings['downloads'].get('luabackend')
+         if date is not None:
+            date = datetime.datetime.fromisoformat(date)
+         toml_user = os.path.join(mods_folder, 'LuaBackend.toml')
+         rq = requests.get('https://api.github.com/repos/Sirius902/LuaBackend/releases/latest')
+         if rq.status_code != 200:
+            print(f'Error {rq.status_code}!')
+            try:
+               print(json.loads(rq.text)['message'])
+            except:
+               print(rq.text)
+         else:
+            release = json.loads(rq.text)
+            for asset in release['assets']:
+               if asset['name'] == 'DBGHELP.zip':
+                  asset_date = datetime.datetime.fromisoformat(asset['updated_at'])
+                  if date is None or asset_date > date:
+                     print(f'Downloading update: {release["tag_name"]}')
                      rq = requests.get(asset['browser_download_url'])
-                     with open('/tmp/luabackend.zip', 'wb') as file:
-                        file.write(rq.content)
-                     with zipfile.ZipFile('/tmp/luabackend.zip', 'r') as zip:
-                        zip.extractall(mod_folder)
-                     toml_default = os.path.join(mod_folder, 'LuaBackend.toml')
-                     if not os.path.exists(toml_user):
-                        print('Creating default LuaBackend.toml configuration')
-                        shutil.copyfile(toml_default, toml_user)
-                     os.remove(toml_default)
-            if os.path.exists(mod_folder):
-               symlinks[os.path.join(kh_folder, 'DINPUT8.dll')] = (os.path.join(mod_folder, 'DBGHELP.dll'), False)
-               symlinks[os.path.join(kh_folder, 'lua54.dll')] = (os.path.join(mod_folder, 'lua54.dll'), False)
-               symlinks[os.path.join(kh_folder, 'LuaBackend.toml')] = (toml_user, False)
+                     if rq.status_code != 200:
+                        print(f'Error {rq.status_code}!')
+                        print(rq.text)
+                     else:
+                        with open('/tmp/luabackend.zip', 'wb') as file:
+                           file.write(rq.content)
+                        with zipfile.ZipFile('/tmp/luabackend.zip', 'r') as zip:
+                           zip.extractall(mod_folder)
+                        toml_default = os.path.join(mod_folder, 'LuaBackend.toml')
+                        if not os.path.exists(toml_user):
+                           print('Creating default LuaBackend.toml configuration')
+                           shutil.copyfile(toml_default, toml_user)
+                        os.remove(toml_default)
+                        settings['downloads']['luabackend'] = asset_date.isoformat()
+                     break
+         if os.path.exists(mod_folder):
+            if kh15_folder is not None:
+               symlinks[os.path.join(kh15_folder, 'DINPUT8.dll')] = (os.path.join(mod_folder, 'DBGHELP.dll'), False)
+               symlinks[os.path.join(kh15_folder, 'lua54.dll')] = (os.path.join(mod_folder, 'lua54.dll'), False)
+               symlinks[os.path.join(kh15_folder, 'LuaBackend.toml')] = (toml_user, False)
+            if kh28_folder is not None:
+               symlinks[os.path.join(kh28_folder, 'DINPUT8.dll')] = (os.path.join(mod_folder, 'DBGHELP.dll'), False)
+               symlinks[os.path.join(kh28_folder, 'lua54.dll')] = (os.path.join(mod_folder, 'lua54.dll'), False)
+               symlinks[os.path.join(kh28_folder, 'LuaBackend.toml')] = (toml_user, False)
+         if os.path.exists(toml_user) and (openkh := settings['mods'].get('openkh')) is not None:
+            with open(toml_user, 'r') as toml_file:
+               toml_data = tomlkit.load(toml_file)
+            changes = False
+            for game in ['kh1', 'kh2', 'bbs', 'recom', 'kh3d']:
+               if game in toml_data and 'scripts' in toml_data[game]:
+                  path = os.path.join(openkh, 'mod', game, 'scripts') 
+                  windows_path = 'Z:' + path.replace('/', '\\')
+                  found = False
+                  for script in toml_data[game]['scripts']:
+                     if script['path'] == windows_path:
+                        found = True
+                        break
+                  if not found:
+                     changes = True
+                     print(f'Adding OpenKH scripts folder \'{path}\' to LuaBackend configuration')
+                     toml_data[game]['scripts'].append({'path':windows_path,'relative':False})
+            if changes:
+               with open(toml_user, 'w') as toml_file:
+                  tomlkit.dump(toml_data, toml_file)
 
    for (new, old) in symlinks.items():
       if old is None:
@@ -152,9 +228,9 @@ def main():
          path, dir = old
          symlink(path, new, is_dir=dir)
 
-   if kh_folder is not None:
-      backup_path = os.path.join(kh_folder, 'KINGDOM HEARTS II FINAL MIX VANILLA.exe')
-      launch_path = os.path.join(kh_folder, 'KINGDOM HEARTS II FINAL MIX.exe')
+   if kh15_folder is not None:
+      backup_path = os.path.join(kh15_folder, 'KINGDOM HEARTS II FINAL MIX VANILLA.exe')
+      launch_path = os.path.join(kh15_folder, 'KINGDOM HEARTS II FINAL MIX.exe')
       if backup_vanilla:
          if not os.path.exists(backup_path):
             print('Moving vanilla KH2 executable')
@@ -163,6 +239,9 @@ def main():
          if os.path.exists(backup_path) and not os.path.exists(launch_path):
             print('Restoring vanilla KH2 executable')
             os.rename(backup_path, launch_path)
+
+   with open(settings_path, 'w') as data_file:
+      json.dump(settings, data_file, indent=2)
 
 
 def get_settings(settings_path):
@@ -238,7 +317,7 @@ def get_settings(settings_path):
          settings['saves'] = None
       else:
          saves = os.path.expanduser(saves)
-         settings['saves'] = {'kh1.5+2.5': os.path.join(saves, 'KH1.5+2.5'), 'kh2.8': os.path.join(saves, 'KH2.8'), 'kh3': os.path.join(saves, 'KH3'), 'mom': os.path.join(saves, 'KHMoM')}
+         settings['saves'] = {'kh1.5+2.5': os.path.join(saves, 'Kingdom Hearts 1.5+2.5'), 'kh2.8': os.path.join(saves, 'Kingdom Hearts 2.8'), 'kh3': os.path.join(saves, 'Kingdom Hearts III'), 'mom': os.path.join(saves, 'Kingdom Hearts Melody of Memory')}
       print()
 
    lutris_path = '/bin/lutris'
@@ -247,7 +326,7 @@ def get_settings(settings_path):
       settings['lutris'] = yes_no()
       print()
 
-   if 'mods' not in settings and settings['installs'].get('kh1.5+2.5') is not None:
+   if 'mods' not in settings and (settings['installs'].get('kh1.5+2.5') is not None or settings['installs'].get('kh2.8') is not None):
       settings['mods'] = {}
       print('Where would you like to save modding applications?')
       print('If you don\'t want mods, just press enter.')
@@ -261,18 +340,19 @@ def get_settings(settings_path):
       if folder is not None:
          print('Modding applications to use:')
          print()
-         print('Kingdom Hearts ReFined: (y/n)')
-         answer = yes_no()
-         settings['mods']['refined'] = os.path.join(folder, 'ReFined-KH2') if answer else None
-         print()
-         if answer:
-            settings['mods']['openkh'] = os.path.join(folder, 'OpenKh')
-         else:
+         if settings['installs'].get('kh1.5+2.5') is not None:
+            print('Kingdom Hearts ReFined: (y/n)')
+            answer = yes_no()
+            settings['mods']['refined'] = os.path.join(folder, 'ReFined-KH2') if answer else None
+            print()
+            if answer:
+               settings['mods']['openkh'] = os.path.join(folder, 'OpenKH')
+         if 'openkh' not in settings['mods']:
             print('OpenKh mod manager: (y/n)')
-            settings['mods']['openkh'] = os.path.join(folder, 'OpenKh') if yes_no() else None
+            settings['mods']['openkh'] = os.path.join(folder, 'OpenKH') if yes_no() else None
             print()
          if settings['mods']['openkh']:
-            print('OpenKh panacea mod loader: (y/n)')
+            print('Panacea mod loader: (y/n)')
             settings['mods']['panacea'] = yes_no()
             print()
          print('LuaBackend script loader: (y/n)')
