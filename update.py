@@ -6,6 +6,7 @@ import os
 import subprocess
 import datetime
 import tomlkit
+import yaml
 
 def main():
    settings_path = os.path.join(os.path.dirname(__file__), 'settings.json')
@@ -66,14 +67,13 @@ def main():
       if os.path.exists(epic_folder) and len(os.listdir(epic_folder)) > 0:
          print('Renaming KH 2.8 EPIC folder to EPIC.bak to prevent crashes during FMVs')
          os.rename(epic_folder, os.path.join(kh28_folder, 'EPIC.bak'))
-      symlinks[os.path.join(kh28_folder, 'version.dll')] = None
-      symlinks[os.path.join(kh28_folder, 'panacea_settings.txt')] = None
       symlinks[os.path.join(kh28_folder, 'DINPUT8.dll')] = None
       symlinks[os.path.join(kh28_folder, 'lua54.dll')] = None
       symlinks[os.path.join(kh28_folder, 'LuaBackend.toml')] = None
    
    if (mods_folder := settings['mods'].get('folder')) is not None:
-      if (mod_folder := settings['mods'].get('refined')) is not None:
+      openkh_folder = settings['mods'].get('openkh')
+      if (refined_folder := settings['mods'].get('refined')) is not None:
          print('Checking for ReFined updates...')
          date = settings['downloads'].get('refined')
          if date is not None:
@@ -103,16 +103,77 @@ def main():
                   with open('/tmp/refined.zip', 'wb') as file:
                      file.write(rq.content)
                   with zipfile.ZipFile('/tmp/refined.zip', 'r') as zip:
-                     zip.extractall(mod_folder)
+                     zip.extractall(refined_folder)
                   settings['downloads']['refined'] = newest[0].isoformat()
-         if os.path.exists(mod_folder) and kh15_folder is not None:
-            symlinks[os.path.join(kh15_folder, 'x64')] = (os.path.join(mod_folder, 'x64'), True)
-            symlinks[os.path.join(kh15_folder, 'Keystone.Net.dll')] = (os.path.join(mod_folder, 'Keystone.Net.dll'), False)
-            symlinks[os.path.join(kh15_folder, 'KINGDOM HEARTS II FINAL MIX.exe')] = (os.path.join(mod_folder, 'KINGDOM HEARTS II FINAL MIX.exe'), False)
+         if os.path.exists(refined_folder) and kh15_folder is not None:
+            symlinks[os.path.join(kh15_folder, 'x64')] = (os.path.join(refined_folder, 'x64'), True)
+            symlinks[os.path.join(kh15_folder, 'Keystone.Net.dll')] = (os.path.join(refined_folder, 'Keystone.Net.dll'), False)
+            symlinks[os.path.join(kh15_folder, 'KINGDOM HEARTS II FINAL MIX.exe')] = (os.path.join(refined_folder, 'KINGDOM HEARTS II FINAL MIX.exe'), False)
             symlinks[os.path.join(kh15_folder, 'reFined.ini')] = (os.path.join(mods_folder, 'reFined.ini'), False)
             backup_vanilla = True
 
-      if (mod_folder := settings['mods'].get('openkh')) is not None:
+         def update_mod(settings_key, repo, branch):
+            repo_name = repo.split('/')[1]
+            date = settings['downloads'].get(settings_key)
+            if date is not None:
+               date = datetime.datetime.fromisoformat(date)
+            rq = requests.get(f'https://api.github.com/repos/{repo}/commits/{branch}')
+            if rq.status_code != 200:
+               print(f'Error {rq.status_code}!')
+               try:
+                  print(json.loads(rq.text)['message'])
+               except:
+                  print(rq.text)
+            else:
+               commit = json.loads(rq.text)
+               commit_date = datetime.datetime.fromisoformat(commit['commit']['committer']['date'])
+               if date is None or commit_date > date:
+                  print(f'Downloading {repo_name} patch update: {commit["commit"]["message"]}')
+                  rq = requests.get(f'https://github.com/{repo}/archive/refs/heads/{branch}.zip')
+                  if rq.status_code != 200:
+                     print(f'Error {rq.status_code}!')
+                     print(rq.text)
+                  else:
+                     with open(f'/tmp/{settings_key}.zip', 'wb') as file:
+                        file.write(rq.content)
+                     with zipfile.ZipFile(f'/tmp/{settings_key}.zip', 'r') as zip:
+                        zip.extractall(f'/tmp/{settings_key}')
+                     patch_folder = os.path.join(openkh_folder, f'mods/kh2/{repo}')
+                     shutil.rmtree(patch_folder)
+                     shutil.copytree(f'/tmp/{settings_key}/{repo_name}-{branch}', patch_folder, dirs_exist_ok=True)
+                     settings['downloads'][settings_key] = commit_date.isoformat()
+
+         if openkh_folder is not None:
+            required_mods = []
+            update_mod('refined.main', 'KH-ReFined/KH2-MAIN', 'main')
+            if settings['mods'].get('refined.vanilla_ost'):
+               update_mod('refined.vanilla_ost', 'KH-ReFined/KH2-VanillaOST', 'main')
+               required_mods.append('KH-ReFined/KH2-VanillaOST')
+            if settings['mods'].get('refined.vanilla_enemies'):
+               update_mod('refined.vanilla_enemies', 'KH-ReFined/KH2-VanillaEnemy', 'main')
+               required_mods.append('KH-ReFined/KH2-VanillaEnemy')
+            if settings['mods'].get('refined.multi_audio'):
+               update_mod('refined.multi_audio', 'KH-ReFined/KH2-MultiAudio', 'main')
+               required_mods.append('KH-ReFined/KH2-MultiAudio')
+            required_mods.append('KH-ReFined/KH2-Main')
+            enabled_mods = []
+            enabled_mods_path = os.path.join(openkh_folder, 'mods-KH2.txt')
+            if os.path.exists(enabled_mods_path):
+               with open(enabled_mods_path, 'r') as enabled_file:
+                  enabled_mods = [line.rstrip('\n') for line in enabled_file]
+            changes = False
+            for mod in required_mods:
+               if mod not in enabled_mods:
+                  print(f'Enabling mod {mod}')
+                  enabled_mods.append(mod)
+                  changes = True
+            if changes:
+               with open(enabled_mods_path, 'w') as enabled_file:
+                  for line in enabled_mods:
+                     enabled_file.write(line + '\n')
+
+      if openkh_folder is not None:
+         mods_manager = os.path.join(openkh_folder, 'mods-manager.yml')
          print('Checking for OpenKH updates...')
          date = settings['downloads'].get('openkh')
          if date is not None:
@@ -140,22 +201,42 @@ def main():
                            file.write(rq.content)
                         with zipfile.ZipFile('/tmp/openkh.zip', 'r') as zip:
                            zip.extractall('/tmp/openkh')
-                        shutil.copytree('/tmp/openkh/openkh', mod_folder, dirs_exist_ok=True)
+                        shutil.copytree('/tmp/openkh/openkh', openkh_folder, dirs_exist_ok=True)
+                        if not os.path.exists(mods_manager):
+                           print('Creating default OpenKH mod manager configuration')
+                           with open(mods_manager, 'w') as mods_file:
+                              yaml.dump({"wizardVersionNumber":1,"gameEdition":2}, mods_file)
                         settings['downloads']['openkh'] = asset_date.isoformat()
                      break
-         if os.path.exists(mod_folder):
+         if os.path.exists(openkh_folder):
             if settings['mods'].get('panacea'):
                if kh15_folder is not None:
-                  symlinks[os.path.join(kh15_folder, 'version.dll')] = (os.path.join(mod_folder, 'OpenKH.Panacea.dll'), False)
+                  symlinks[os.path.join(kh15_folder, 'version.dll')] = (os.path.join(openkh_folder, 'OpenKH.Panacea.dll'), False)
                   symlinks[os.path.join(kh15_folder, 'panacea_settings.txt')] = (os.path.join(mods_folder, 'panacea_settings.txt'), False)
-               if kh28_folder is not None:
-                  symlinks[os.path.join(kh28_folder, 'version.dll')] = (os.path.join(mod_folder, 'OpenKH.Panacea.dll'), False)
-                  symlinks[os.path.join(kh28_folder, 'panacea_settings.txt')] = (os.path.join(mods_folder, 'panacea_settings.txt'), False)
-            mod_dir = os.path.join(mods_folder, 'Mods')
-            os.makedirs(mod_dir, exist_ok=True)
-            symlinks[os.path.join(mod_folder, 'mods')] = (mod_dir, True)
+            mods_location = settings['mods'].get('mods')
+            symlinks[os.path.join(openkh_folder, 'mods')] = None
+            if mods_location is not None:
+               os.makedirs(mods_location, exist_ok=True)
+               symlinks[os.path.join(openkh_folder, 'mods')] = (mods_location, True)
+            if os.path.exists(mods_manager):
+               changes = False
+               with open(mods_manager, 'r') as mods_file:
+                  mods_data = yaml.safe_load(mods_file)
+               pc_release = 'Z:' + kh15_folder.replace('/','\\')
+               if mods_data.get('pcReleaseLocation') != pc_release:
+                  print('Updating KH 1.5 install location in OpenKH mod manager')
+                  mods_data['pcReleaseLocation'] = pc_release
+                  changes = True
+               panacea = settings['mods'].get('panacea') == True
+               if mods_data.get('panaceaInstalled') != panacea:
+                  print('Updating panacea install status in OpenKH mod manager')
+                  mods_data['panaceaInstalled'] = panacea
+                  changes = True
+               if changes:
+                  with open(mods_manager, 'w') as mods_file:
+                     yaml.dump(mods_data, mods_file)
 
-      if (mod_folder := settings['mods'].get('luabackend')) is not None:
+      if (lua_folder := settings['mods'].get('luabackend')) is not None:
          print('Checking for LuaBackend updates...')
          date = settings['downloads'].get('luabackend')
          if date is not None:
@@ -183,22 +264,22 @@ def main():
                         with open('/tmp/luabackend.zip', 'wb') as file:
                            file.write(rq.content)
                         with zipfile.ZipFile('/tmp/luabackend.zip', 'r') as zip:
-                           zip.extractall(mod_folder)
-                        toml_default = os.path.join(mod_folder, 'LuaBackend.toml')
+                           zip.extractall(lua_folder)
+                        toml_default = os.path.join(lua_folder, 'LuaBackend.toml')
                         if not os.path.exists(toml_user):
                            print('Creating default LuaBackend.toml configuration')
                            shutil.copyfile(toml_default, toml_user)
                         os.remove(toml_default)
                         settings['downloads']['luabackend'] = asset_date.isoformat()
                      break
-         if os.path.exists(mod_folder):
+         if os.path.exists(lua_folder):
             if kh15_folder is not None:
-               symlinks[os.path.join(kh15_folder, 'DINPUT8.dll')] = (os.path.join(mod_folder, 'DBGHELP.dll'), False)
-               symlinks[os.path.join(kh15_folder, 'lua54.dll')] = (os.path.join(mod_folder, 'lua54.dll'), False)
+               symlinks[os.path.join(kh15_folder, 'DINPUT8.dll')] = (os.path.join(lua_folder, 'DBGHELP.dll'), False)
+               symlinks[os.path.join(kh15_folder, 'lua54.dll')] = (os.path.join(lua_folder, 'lua54.dll'), False)
                symlinks[os.path.join(kh15_folder, 'LuaBackend.toml')] = (toml_user, False)
             if kh28_folder is not None:
-               symlinks[os.path.join(kh28_folder, 'DINPUT8.dll')] = (os.path.join(mod_folder, 'DBGHELP.dll'), False)
-               symlinks[os.path.join(kh28_folder, 'lua54.dll')] = (os.path.join(mod_folder, 'lua54.dll'), False)
+               symlinks[os.path.join(kh28_folder, 'DINPUT8.dll')] = (os.path.join(lua_folder, 'DBGHELP.dll'), False)
+               symlinks[os.path.join(kh28_folder, 'lua54.dll')] = (os.path.join(lua_folder, 'lua54.dll'), False)
                symlinks[os.path.join(kh28_folder, 'LuaBackend.toml')] = (toml_user, False)
          if os.path.exists(toml_user) and (openkh := settings['mods'].get('openkh')) is not None:
             with open(toml_user, 'r') as toml_file:
@@ -338,6 +419,7 @@ def get_settings(settings_path):
       settings['mods']['folder'] = folder
       print()
       if folder is not None:
+         settings['mods']['mods'] = os.path.join(folder, 'Mods')
          print('Modding applications to use:')
          print()
          if settings['installs'].get('kh1.5+2.5') is not None:
@@ -347,14 +429,23 @@ def get_settings(settings_path):
             print()
             if answer:
                settings['mods']['openkh'] = os.path.join(folder, 'OpenKH')
-         if 'openkh' not in settings['mods']:
-            print('OpenKh mod manager: (y/n)')
-            settings['mods']['openkh'] = os.path.join(folder, 'OpenKH') if yes_no() else None
-            print()
-         if settings['mods']['openkh']:
-            print('Panacea mod loader: (y/n)')
-            settings['mods']['panacea'] = yes_no()
-            print()
+               print('ReFined addon: Vanilla OST toggle (y/n)')
+               settings['mods']['refined.vanilla_ost'] = yes_no()
+               print()
+               print('ReFined addon: Vanilla enemies toggle (y/n)')
+               settings['mods']['refined.vanilla_enemies'] = yes_no()
+               print()
+               print('ReFined addon: Multi-language voices (y/n)')
+               settings['mods']['refined.multi_audio'] = yes_no()
+               print()
+            if 'openkh' not in settings['mods']:
+               print('OpenKh mod manager: (y/n)')
+               settings['mods']['openkh'] = os.path.join(folder, 'OpenKH') if yes_no() else None
+               print()
+            if settings['mods']['openkh']:
+               print('Panacea mod loader: (y/n)')
+               settings['mods']['panacea'] = yes_no()
+               print()
          print('LuaBackend script loader: (y/n)')
          settings['mods']['luabackend'] = os.path.join(folder, 'LuaBackend') if yes_no() else None
          print()
