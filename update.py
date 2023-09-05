@@ -20,14 +20,14 @@ def main():
    print('Starting!')
    symlinks = {}
 
-   kh15_folder = settings['installs'].get('kh1.5+2.5')
-   kh28_folder = settings['installs'].get('kh2.8')
-   kh3_folder = settings['installs'].get('kh3')
-   khmom_folder = settings['installs'].get('mom')
+   kh15_folder = settings['installs']['kh1.5+2.5']
+   kh28_folder = settings['installs']['kh2.8']
+   kh3_folder = settings['installs']['kh3']
+   khmom_folder = settings['installs']['khmom']
 
    new_lutris = False
    runner_dest = None
-   if settings.get('lutris'):
+   if settings.get('lutris') == True:
       lutris_local = os.path.expanduser('~/.local/share/lutris')
       lutris_config = os.path.expanduser('~/.config/lutris')
       print('Checking for Lutris runner updates...')
@@ -137,47 +137,46 @@ def main():
             install_game('kingdom-hearts-iii', 'Kingdom Hearts III', os.path.join(kh3_folder, 'KINGDOM HEARTS III/Binaries/Win64/KINGDOM HEARTS III.exe'), False, False)
          if khmom_folder is not None:
             install_game('kingdom-hearts-melody-of-memory', 'Kingdom Hearts Melody of Memory', os.path.join(khmom_folder, 'KINGDOM HEARTS Melody of Memory.exe'), False, False)
-         
-   if (wineprefix := settings.get('wineprefix')) is not None:
-      user_folder = os.path.join(wineprefix, 'drive_c/users', os.getlogin())
-      if not os.path.exists(user_folder):
-         print('Initializing wineprefix')
-         subprocess.run('wineboot', env=dict(os.environ, WINEPREFIX=wineprefix), check=True)
-      if settings['mods'].get('refined') is not None and not os.path.exists(os.path.join(wineprefix, 'drive_c/windows/dotnet48.installed.workaround')):
-         print('Installing dotnet to wineprefix')
-         subprocess.run(['winetricks', '-q', 'dotnet20', 'dotnet48'], env=dict(os.environ, WINEPREFIX=wineprefix), check=True)
-      if (kh3_folder is not None or kh28_folder is not None) and (new_lutris or not os.path.exists(os.path.join(wineprefix, 'drive_c/windows/system32/sqmapi.dll'))):
-         print('Running mf-install to fix KH3/KH2.8')
-         mfinstall_folder = tempfile.mkdtemp()
-         subprocess.run(['git', 'clone', 'https://github.com/z0z0z/mf-install', mfinstall_folder], check=True)
-         env = os.environ.copy()
-         env['PATH'] = f'{runner_dest}/bin:{env["PATH"]}'
-         env['WINEPREFIX'] = wineprefix
-         subprocess.run(['/bin/sh', os.path.join(mfinstall_folder, 'mf-install.sh')], env=env, check=True)
-         shutil.rmtree(mfinstall_folder)
-      symlinks[os.path.join(user_folder, 'Documents')] = None
-      symlinks[os.path.join(user_folder, 'Documents/Kingdom Hearts/Configuration/1638')] = None
-      symlinks[os.path.join(user_folder, 'Documents/Kingdom Hearts/Save Data/1638')] = None
-      symlinks[os.path.join(user_folder, 'Documents/KINGDOM HEARTS HD 1.5+2.5 ReMIX/Epic Games Store/1638')] = None
-      symlinks[os.path.join(user_folder, 'Documents/KINGDOM HEARTS HD 2.8 Final Chapter Prologue/Epic Games Store/1638')] = None
-      symlinks[os.path.join(user_folder, 'Documents/KINGDOM HEARTS III/Epic Games Store/1638')] = None
-      symlinks[os.path.join(user_folder, 'Documents/KINGDOM HEARTS Melody of Memory/Epic Games Store')] = None
-      if (saves := settings.get('saves')) is not None:
-         if (save := saves.get('kh1.5+2.5')) is not None:
-            os.makedirs(save, exist_ok=True)
-            symlinks[os.path.join(user_folder, 'Documents/KINGDOM HEARTS HD 1.5+2.5 ReMIX/Epic Games Store/1638')] = (save, True)
-            if settings['mods'].get('refined'):
-               symlinks[os.path.join(user_folder, 'Documents/Kingdom Hearts/Configuration/1638')] = (save, True)
-               symlinks[os.path.join(user_folder, 'Documents/Kingdom Hearts/Save Data/1638')] = (save, True)
-         if (save := saves.get('kh2.8')) is not None:
-            os.makedirs(save, exist_ok=True)
-            symlinks[os.path.join(user_folder, 'Documents/KINGDOM HEARTS HD 2.8 Final Chapter Prologue/Epic Games Store/1638')] = (save, True)
-         if (save := saves.get('kh3')) is not None:
-            os.makedirs(save, exist_ok=True)
-            symlinks[os.path.join(user_folder, 'Documents/KINGDOM HEARTS III/Epic Games Store/1638')] = (save, True)
-         if (save := saves.get('mom')) is not None:
-            os.makedirs(save, exist_ok=True)
-            symlinks[os.path.join(user_folder, 'Documents/KINGDOM HEARTS Melody of Memory/Epic Games Store')] = (save, True)
+   
+   wineprefix = settings['wineprefix']
+   user_folder = os.path.join(wineprefix, 'drive_c/users', os.getlogin())
+   if not os.path.exists(user_folder):
+      print('Initializing wineprefix')
+      subprocess.run('wineboot', env=dict(os.environ, WINEPREFIX=wineprefix), check=True)
+   if settings['mods'].get('refined') is not None and not os.path.exists(os.path.join(wineprefix, 'drive_c/windows/dotnet48.installed.workaround')):
+      print('Installing dotnet to wineprefix')
+      subprocess.run(['winetricks', '-q', 'dotnet20', 'dotnet48'], env=dict(os.environ, WINEPREFIX=wineprefix), check=True)
+   if (kh3_folder is not None or kh28_folder is not None) and (new_lutris or not os.path.exists(os.path.join(wineprefix, 'drive_c/windows/system32/sqmapi.dll'))):
+      print('Running mf-install to fix KH3/KH2.8')
+      mfinstall_folder = tempfile.mkdtemp()
+      subprocess.run(['git', 'clone', 'https://github.com/z0z0z/mf-install', mfinstall_folder], check=True)
+      env = os.environ.copy()
+      env['PATH'] = f'{runner_dest}/bin:{env["PATH"]}'
+      env['WINEPREFIX'] = wineprefix
+      subprocess.run(['/bin/sh', os.path.join(mfinstall_folder, 'mf-install.sh')], env=env, check=True)
+      shutil.rmtree(mfinstall_folder)
+   symlinks[os.path.join(user_folder, 'Documents')] = None
+   symlinks[os.path.join(user_folder, 'Documents/Kingdom Hearts/Configuration/1638')] = None
+   symlinks[os.path.join(user_folder, 'Documents/Kingdom Hearts/Save Data/1638')] = None
+   symlinks[os.path.join(user_folder, 'Documents/KINGDOM HEARTS HD 1.5+2.5 ReMIX/Epic Games Store/1638')] = None
+   symlinks[os.path.join(user_folder, 'Documents/KINGDOM HEARTS HD 2.8 Final Chapter Prologue/Epic Games Store/1638')] = None
+   symlinks[os.path.join(user_folder, 'Documents/KINGDOM HEARTS III/Epic Games Store/1638')] = None
+   symlinks[os.path.join(user_folder, 'Documents/KINGDOM HEARTS Melody of Memory/Epic Games Store')] = None
+   if (save := settings['saves']['kh1.5+2.5']) is not None:
+      os.makedirs(save, exist_ok=True)
+      symlinks[os.path.join(user_folder, 'Documents/KINGDOM HEARTS HD 1.5+2.5 ReMIX/Epic Games Store/1638')] = (save, True)
+      if settings['mods'].get('refined') is not None:
+         symlinks[os.path.join(user_folder, 'Documents/Kingdom Hearts/Configuration/1638')] = (save, True)
+         symlinks[os.path.join(user_folder, 'Documents/Kingdom Hearts/Save Data/1638')] = (save, True)
+   if (save := settings['saves']['kh2.8']) is not None:
+      os.makedirs(save, exist_ok=True)
+      symlinks[os.path.join(user_folder, 'Documents/KINGDOM HEARTS HD 2.8 Final Chapter Prologue/Epic Games Store/1638')] = (save, True)
+   if (save := settings['saves']['kh3']) is not None:
+      os.makedirs(save, exist_ok=True)
+      symlinks[os.path.join(user_folder, 'Documents/KINGDOM HEARTS III/Epic Games Store/1638')] = (save, True)
+   if (save := settings['saves']['khmom']) is not None:
+      os.makedirs(save, exist_ok=True)
+      symlinks[os.path.join(user_folder, 'Documents/KINGDOM HEARTS Melody of Memory/Epic Games Store')] = (save, True)
    
    backup_vanilla = False
    if kh15_folder is not None:
@@ -266,16 +265,17 @@ def main():
          print('Creating default OpenKH mod manager configuration')
          with open(mods_manager, 'w') as mods_file:
             yaml.dump({"gameEdition":2}, mods_file)
-         if settings['mods'].get('panacea'):
+         if pana_settings is not None:
             if not os.path.exists(pana_settings):
                print('Creating default panacea configuration')
                with open(pana_settings, 'w') as pana_file:
                   mod_path = os.path.join(openkh_folder, 'mod')
                   pana_file.write('mod_path=Z:' + mod_path.replace('/', '\\') + '\nshow_console=False')
       if os.path.exists(openkh_folder):
-         if settings['mods'].get('panacea') and kh15_folder is not None:
+         if settings['mods'].get('panacea') == True and kh15_folder is not None:
             symlinks[os.path.join(kh15_folder, 'version.dll')] = (os.path.join(openkh_folder, 'OpenKH.Panacea.dll'), False)
-            symlinks[os.path.join(kh15_folder, 'panacea_settings.txt')] = (pana_settings, False)
+            if pana_settings is not None:
+               symlinks[os.path.join(kh15_folder, 'panacea_settings.txt')] = (pana_settings, False)
          symlinks[os.path.join(openkh_folder, 'mods')] = None
          if mods_folder is not None:
             os.makedirs(mods_folder, exist_ok=True)
@@ -317,11 +317,11 @@ def main():
          print('Checking for ReFined updates...')
          download_latest('refined', 'https://api.github.com/repos/TopazTK/KH-ReFined/releases', lambda x: x['name'].endswith('.zip'), None, refined_folder)
          update_mod('KH-ReFined/KH2-MAIN')
-         if settings['mods'].get('refined.vanilla_ost'):
+         if settings['mods'].get('refined.vanilla_ost') == True:
             update_mod('KH-ReFined/KH2-VanillaOST')
-         if settings['mods'].get('refined.vanilla_enemies'):
+         if settings['mods'].get('refined.vanilla_enemies') == True:
             update_mod('KH-ReFined/KH2-VanillaEnemy')
-         if settings['mods'].get('refined.multi_audio'):
+         if settings['mods'].get('refined.multi_audio') == True:
             update_mod('KH-ReFined/KH2-MultiAudio')
          if os.path.exists(refined_folder) and kh15_folder is not None:
             symlinks[os.path.join(kh15_folder, 'x64')] = (os.path.join(refined_folder, 'x64'), True)
@@ -442,6 +442,7 @@ def get_settings(settings_path):
       print('Input the folders where your Kingdom Hearts games are installed.')
       print('For any you don\'t have, just press enter.')
       print()
+   if 'kh1.5+2.5' not in settings['installs']:
       print('Kingdom Hearts HD 1.5+2.5 ReMIX:')
       while True:
          install = input('> ')
@@ -455,6 +456,7 @@ def get_settings(settings_path):
          break
       settings['installs']['kh1.5+2.5'] = install
       print()
+   if 'kh2.8' not in settings['installs']:
       print('Kingdom Hearts HD 2.8 Final Chapter Prologue:')
       while True:
          install = input('> ')
@@ -468,6 +470,7 @@ def get_settings(settings_path):
          break
       settings['installs']['kh2.8'] = install
       print()
+   if 'kh3' not in settings['installs']:
       print('Kingdom Hearts III:')
       while True:
          install = input('> ')
@@ -481,6 +484,8 @@ def get_settings(settings_path):
          break
       settings['installs']['kh3'] = install
       print()
+   if 'khmom' not in settings['installs']:
+      settings['installs']['khmom'] = None
 
    if 'wineprefix' not in settings:
       print('Input the folder for your wineprefix.')
@@ -497,11 +502,19 @@ def get_settings(settings_path):
       print('To leave them in the default location (wineprefix documents folder), just press enter.')
       saves = input('> ')
       if saves == '':
-         settings['saves'] = None
+         settings['saves'] = {}
       else:
          saves = os.path.expanduser(saves)
-         settings['saves'] = {'kh1.5+2.5': os.path.join(saves, 'Kingdom Hearts 1.5+2.5'), 'kh2.8': os.path.join(saves, 'Kingdom Hearts 2.8'), 'kh3': os.path.join(saves, 'Kingdom Hearts III'), 'mom': os.path.join(saves, 'Kingdom Hearts Melody of Memory')}
+         settings['saves'] = {'kh1.5+2.5': os.path.join(saves, 'Kingdom Hearts 1.5+2.5'), 'kh2.8': os.path.join(saves, 'Kingdom Hearts 2.8'), 'kh3': os.path.join(saves, 'Kingdom Hearts III'), 'khmom': os.path.join(saves, 'Kingdom Hearts Melody of Memory')}
       print()
+      if 'kh1.5+2.5' not in settings['saves']:
+         settings['saves']['kh1.5+2.5'] = None
+      if 'kh2.8' not in settings['saves']:
+         settings['saves']['kh2.8'] = None
+      if 'kh3' not in settings['saves']:
+         settings['saves']['kh3'] = None
+      if 'khmom' not in settings['saves']:
+         settings['saves']['khmom'] = None
 
    lutris_path = '/bin/lutris'
    if 'lutris' not in settings and os.path.exists(lutris_path):
@@ -509,7 +522,7 @@ def get_settings(settings_path):
       settings['lutris'] = yes_no()
       print()
 
-   if 'mods' not in settings and (settings['installs'].get('kh1.5+2.5') is not None or settings['installs'].get('kh2.8') is not None):
+   if 'mods' not in settings and (settings['installs']['kh1.5+2.5'] is not None or settings['installs']['kh2.8'] is not None):
       settings['mods'] = {}
       print('Where would you like to save modding applications?')
       print('If you don\'t want mods, just press enter.')
@@ -518,54 +531,66 @@ def get_settings(settings_path):
          folder = None
       else:
          folder = os.path.expanduser(folder)
-      print()
+      settings['mods']['folder'] = folder
       if folder is not None:
          settings['mods']['mods'] = os.path.join(folder, 'Mods')
-         print('Modding applications to use:')
+      print()
+      print('Modding applications to use:')
+      print()
+   if (folder := settings['mods']['folder']) is not None:
+      if 'refined' not in settings['mods'] and settings['installs']['kh1.5+2.5'] is not None:
+         print('Kingdom Hearts ReFined: (y/n)')
+         answer = yes_no()
+         settings['mods']['refined'] = os.path.join(folder, 'ReFined-KH2') if answer else None
          print()
-         if settings['installs'].get('kh1.5+2.5') is not None:
-            print('Kingdom Hearts ReFined: (y/n)')
-            answer = yes_no()
-            settings['mods']['refined'] = os.path.join(folder, 'ReFined-KH2') if answer else None
-            print()
-            if answer:
+         if answer:
+            if 'refined_config' not in settings['mods']:
                settings['mods']['refined_config'] = os.path.join(folder, 'reFined.ini')
-               settings['mods']['openkh'] = os.path.join(folder, 'OpenKH')
-               print('ReFined addon: Vanilla OST toggle (y/n)')
-               settings['mods']['refined.vanilla_ost'] = yes_no()
-               print()
-               print('ReFined addon: Vanilla enemies toggle (y/n)')
-               settings['mods']['refined.vanilla_enemies'] = yes_no()
-               print()
-               print('ReFined addon: Multi-language voices (y/n)')
-               settings['mods']['refined.multi_audio'] = yes_no()
-               print()
-            print('Kingdom Hearts II Randomizer: (y/n)')
-            answer = yes_no()
-            settings['mods']['randomizer'] = os.path.join(folder, 'Randomizer') if answer else None
-            print()
-            if answer:
-               settings['mods']['openkh'] = os.path.join(folder, 'OpenKH')
-               settings['mods']['luabackend'] = os.path.join(folder, 'LuaBackend')
-               settings['mods']['luabackend_config'] = os.path.join(folder, 'LuaBackend.toml')
             if 'openkh' not in settings['mods']:
-               print('OpenKh mod manager: (y/n)')
-               settings['mods']['openkh'] = os.path.join(folder, 'OpenKH') if yes_no() else None
-               print()
-            if settings['mods']['openkh']:
-               print('Panacea mod loader: (y/n)')
-               answer = yes_no()
-               settings['mods']['panacea'] = answer
-               if answer:
-                  settings['mods']['panacea_settings'] = os.path.join(folder, 'panacea_settings.txt')
-               print()
-         if 'luabackend' not in settings['mods']:
-            print('LuaBackend script loader: (y/n)')
-            answer = yes_no()
-            settings['mods']['luabackend'] = os.path.join(folder, 'LuaBackend') if answer else None
-            if answer:
-               settings['mods']['luabackend_config'] = os.path.join(folder, 'LuaBackend.toml')
+               settings['mods']['openkh'] = os.path.join(folder, 'OpenKH')
+      if settings['mods']['refined'] is not None:
+         if 'refined.vanilla_ost' not in settings['mods']:
+            print('ReFined addon: Vanilla OST toggle (y/n)')
+            settings['mods']['refined.vanilla_ost'] = yes_no()
             print()
+         if 'refined.vanilla_enemies' not in settings['mods']:
+            print('ReFined addon: Vanilla enemies toggle (y/n)')
+            settings['mods']['refined.vanilla_enemies'] = yes_no()
+            print()
+         if 'refined.multi_audio' not in settings['mods']:
+            print('ReFined addon: Multi-language voices (y/n)')
+            settings['mods']['refined.multi_audio'] = yes_no()
+            print()
+      if 'randomizer' not in settings['mods']:
+         print('Kingdom Hearts II Randomizer: (y/n)')
+         answer = yes_no()
+         settings['mods']['randomizer'] = os.path.join(folder, 'Randomizer') if answer else None
+         print()
+         if answer:
+            if 'openkh' not in settings['mods']:
+               settings['mods']['openkh'] = os.path.join(folder, 'OpenKH')
+            if 'luabackend' not in settings['mods']:
+               settings['mods']['luabackend'] = os.path.join(folder, 'LuaBackend')
+            if 'luabackend_config' not in settings['mods']:
+               settings['mods']['luabackend_config'] = os.path.join(folder, 'LuaBackend.toml')
+      if 'openkh' not in settings['mods']:
+         print('OpenKh mod manager: (y/n)')
+         settings['mods']['openkh'] = os.path.join(folder, 'OpenKH') if yes_no() else None
+         print()
+      if settings['mods']['openkh'] is not None and 'panacea' not in settings['mods']:
+         print('Panacea mod loader: (y/n)')
+         answer = yes_no()
+         settings['mods']['panacea'] = answer
+         if answer:
+            settings['mods']['panacea_settings'] = os.path.join(folder, 'panacea_settings.txt')
+         print()
+      if 'luabackend' not in settings['mods']:
+         print('LuaBackend script loader: (y/n)')
+         answer = yes_no()
+         settings['mods']['luabackend'] = os.path.join(folder, 'LuaBackend') if answer else None
+         if answer:
+            settings['mods']['luabackend_config'] = os.path.join(folder, 'LuaBackend.toml')
+         print()
 
    with open(settings_path, 'w') as data_file:
       json.dump(settings, data_file, indent=2)
