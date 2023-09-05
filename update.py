@@ -8,6 +8,8 @@ import datetime
 import tomlkit
 import yaml
 import tempfile
+import sqlite3
+import time
 
 def main():
    settings_path = os.path.join(os.path.dirname(__file__), 'settings.json')
@@ -17,6 +19,59 @@ def main():
    print('Starting!')
    symlinks = {}
 
+   kh15_folder = settings['installs'].get('kh1.5+2.5')
+   kh28_folder = settings['installs'].get('kh2.8')
+   kh3_folder = settings['installs'].get('kh3')
+   khmom_folder = settings['installs'].get('mom')
+
+   if settings.get('lutris'):
+      db_path = os.path.expanduser('~/.local/share/lutris/pga.db')
+      if os.path.exists(db_path):
+         database = sqlite3.connect(db_path)
+         config_folder = os.path.expanduser('~/.config/lutris/games')
+
+         def install_game(id, name, path):
+            config_path = os.path.join(config_folder, id + '.yml')
+            if os.path.exists(config_path):
+               changes = False
+               with open(config_path, 'r') as config_file:
+                  data = yaml.safe_load(config_file)
+               if data['game']['exe'] != path:
+                  data['game']['exe'] = path
+                  changes = True
+               if data['game']['prefix'] != settings['wineprefix']:
+                  data['game']['prefix'] = settings['wineprefix']
+                  changes = True
+               if changes:
+                  print(f'Updating \'{name}\' config in Lutris')
+                  with open(config_path, 'w') as config_file:
+                     yaml.dump(data, config_file)
+            else:
+               print(f'Adding \'{name}\' to Lutris')
+               with open(config_path, 'w') as config_file:
+                  yaml.dump({"game":{"exe":path,"prefix":settings['wineprefix']},"system":{},"wine":{}}, config_file)
+               data = {"name":name,"slug":id,"platform":"Windows","runner":"wine","directory":"","installed":1,"installed_at":int(time.time()),"configpath":id,"hidden":0}
+               cursor = database.cursor()
+               columns = ', '.join(list(data.keys()))
+               placeholders = ("?, " * len(data))[:-2]
+               values = tuple(data.values())
+               cursor.execute(f'INSERT INTO games({columns}) VALUES ({placeholders})', values)
+               database.commit()
+               cursor.close()
+         
+         if kh15_folder is not None:
+            install_game('kingdom-hearts-final-mix', 'Kingdom Hearts Final Mix', os.path.join(kh15_folder, 'KINGDOM HEARTS FINAL MIX.exe'))
+            install_game('kingdom-hearts-ii-final-mix', 'Kingdom Hearts II Final Mix', os.path.join(kh15_folder, 'KINGDOM HEARTS II FINAL MIX.exe'))
+            install_game('kingdom-hearts-re-chain-of-memories', 'Kingdom Hearts Re:Chain of Memories', os.path.join(kh15_folder, 'KINGDOM HEARTS Re_Chain of Memories.exe'))
+            install_game('kingdom-hearts-birth-by-sleep-final-mix', 'Kingdom Hearts Birth by Sleep Final Mix', os.path.join(kh15_folder, 'KINGDOM HEARTS Birth by Sleep FINAL MIX.exe'))
+         if kh28_folder is not None:
+            install_game('kingdom-hearts-3d-dream-drop-distance', 'Kingdom Hearts 3D: Dream Drop Distance', os.path.join(kh28_folder, 'KINGDOM HEARTS Dream Drop Distance.exe'))
+            install_game('kingdom-hearts-02-birth-by-sleep-a-fragmentary-passage', 'Kingdom Hearts 0.2 Birth by Sleep -A fragmentary passage-', os.path.join(kh28_folder, 'KINGDOM HEARTS HD 2.8 Final Chapter Prologue.exe'))
+         if kh3_folder is not None:
+            install_game('kingdom-hearts-iii', 'Kingdom Hearts III', os.path.join(kh3_folder, 'KINGDOM HEARTS III/Binaries/Win64/KINGDOM HEARTS III.exe'))
+         if khmom_folder is not None:
+            install_game('kingdom-hearts-melody-of-memory', 'Kingdom Hearts Melody of Memory', os.path.join(khmom_folder, 'KINGDOM HEARTS Melody of Memory.exe'))
+         
    if (wineprefix := settings.get('wineprefix')) is not None:
       if not os.path.exists(wineprefix):
          print('Initializing wineprefix')
@@ -47,8 +102,6 @@ def main():
             symlinks[os.path.join(user_folder, 'Documents/KINGDOM HEARTS Melody of Memory/Epic Games Store')] = (save, True)
    
    backup_vanilla = False
-   kh15_folder = settings['installs'].get('kh1.5+2.5')
-   kh28_folder = settings['installs'].get('kh2.8')
    if kh15_folder is not None:
       epic_folder = os.path.join(kh15_folder, 'EPIC')
       if os.path.exists(epic_folder) and len(os.listdir(epic_folder)) > 0:
@@ -127,18 +180,23 @@ def main():
    mods_folder = settings['mods'].get('mods')
    if openkh_folder is not None:
       mods_manager = os.path.join(openkh_folder, 'mods-manager.yml')
+      pana_settings = settings['mods'].get('panacea_settings')
       print('Checking for OpenKH updates...')
       downloaded = download_latest('openkh', 'https://api.github.com/repos/OpenKH/OpenKh/releases/tags/latest', lambda x: x['name'] == 'openkh.zip', 'openkh', openkh_folder)
       if downloaded and not os.path.exists(mods_manager):
          print('Creating default OpenKH mod manager configuration')
          with open(mods_manager, 'w') as mods_file:
             yaml.dump({"gameEdition":2}, mods_file)
-      if os.path.exists(openkh_folder):
          if settings['mods'].get('panacea'):
-            if kh15_folder is not None:
-               symlinks[os.path.join(kh15_folder, 'version.dll')] = (os.path.join(openkh_folder, 'OpenKH.Panacea.dll'), False)
-               if (pana_settings := settings['mods'].get('panacea_settings')) is not None:
-                  symlinks[os.path.join(kh15_folder, 'panacea_settings.txt')] = (pana_settings, False)
+            if not os.path.exists(pana_settings):
+               print('Creating default panacea configuration')
+               with open(pana_settings, 'w') as pana_file:
+                  mod_path = os.path.join(openkh_folder, 'mod')
+                  pana_file.write('mod_path=Z:' + mod_path.replace('/', '\\') + '\nshow_console=False')
+      if os.path.exists(openkh_folder):
+         if settings['mods'].get('panacea') and kh15_folder is not None:
+            symlinks[os.path.join(kh15_folder, 'version.dll')] = (os.path.join(openkh_folder, 'OpenKH.Panacea.dll'), False)
+            symlinks[os.path.join(kh15_folder, 'panacea_settings.txt')] = (pana_settings, False)
          symlinks[os.path.join(openkh_folder, 'mods')] = None
          if mods_folder is not None:
             os.makedirs(mods_folder, exist_ok=True)
@@ -175,7 +233,7 @@ def main():
             subprocess.run(['git', 'pull', '--recurse-submodules'], cwd=patch_folder)
          mod_changes[repo] = True
 
-      mod_changes = {'KH-ReFined/KH2-MAIN': False, 'KH-ReFined/KH2-VanillaOST': False, 'KH-ReFined/KH2-VanillaEnemy': False, 'KH-ReFined/KH2-MultiAudio': False, 'KH2FM-Mods-Num/GoA-ROM-Edition': False}
+      mod_changes = {'KH2FM-Mods-Num/GoA-ROM-Edition': False, 'KH-ReFined/KH2-VanillaOST': False, 'KH-ReFined/KH2-VanillaEnemy': False, 'KH-ReFined/KH2-MultiAudio': False, 'KH-ReFined/KH2-MAIN': False}
       if (refined_folder := settings['mods'].get('refined')) is not None:
          print('Checking for ReFined updates...')
          download_latest('refined', 'https://api.github.com/repos/TopazTK/KH-ReFined/releases', lambda x: x['name'].endswith('.zip'), None, refined_folder)
