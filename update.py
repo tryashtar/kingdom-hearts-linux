@@ -7,6 +7,7 @@ import subprocess
 import datetime
 import tomlkit
 import yaml
+import tempfile
 
 def main():
    settings_path = os.path.join(os.path.dirname(__file__), 'settings.json')
@@ -71,44 +72,67 @@ def main():
       symlinks[os.path.join(kh28_folder, 'lua54.dll')] = None
       symlinks[os.path.join(kh28_folder, 'LuaBackend.toml')] = None
    
-   openkh_folder = settings['mods'].get('openkh')
-   mods_folder = settings['mods'].get('mods')
-   if openkh_folder is not None:
-      mods_manager = os.path.join(openkh_folder, 'mods-manager.yml')
-      print('Checking for OpenKH updates...')
-      date = settings['downloads'].get('openkh')
+   def download_latest(date_key, url, filter, top_level, destination_folder):
+      date = settings['downloads'].get(date_key)
       if date is not None:
          date = datetime.datetime.fromisoformat(date)
-      rq = requests.get('https://api.github.com/repos/OpenKH/OpenKh/releases/tags/latest')
+      rq = requests.get(url)
       if rq.status_code != 200:
          print(f'Error {rq.status_code}!')
          try:
             print(json.loads(rq.text)['message'])
          except:
             print(rq.text)
+         return False
+      if url.endswith('/releases'):
+         newest = None
+         release = None
+         releases = json.loads(rq.text)
+         for next in releases:
+            release_time = datetime.datetime.fromisoformat(next['published_at'])
+            if newest is None or release_time > newest:
+               newest = release_time
+               release = next
+         if release is None:
+            return False
       else:
          release = json.loads(rq.text)
-         for asset in release['assets']:
-            if asset['name'] == 'openkh.zip':
-               asset_date = datetime.datetime.fromisoformat(asset['updated_at'])
-               if date is None or asset_date > date:
-                  print(f'Downloading update: {release["tag_name"]}')
-                  rq = requests.get(asset['browser_download_url'])
-                  if rq.status_code != 200:
-                     print(f'Error {rq.status_code}!')
-                     print(rq.text)
-                  else:
-                     with open('/tmp/openkh.zip', 'wb') as file:
-                        file.write(rq.content)
-                     with zipfile.ZipFile('/tmp/openkh.zip', 'r') as zip:
-                        zip.extractall('/tmp/openkh')
-                     shutil.copytree('/tmp/openkh/openkh', openkh_folder, dirs_exist_ok=True)
-                     if not os.path.exists(mods_manager):
-                        print('Creating default OpenKH mod manager configuration')
-                        with open(mods_manager, 'w') as mods_file:
-                           yaml.dump({"gameEdition":2}, mods_file)
-                     settings['downloads']['openkh'] = asset_date.isoformat()
-                  break
+      for asset in release['assets']:
+         if not filter(asset):
+            continue
+         asset_date = datetime.datetime.fromisoformat(asset['updated_at'])
+         if date is None or asset_date > date:
+            print(f'Downloading update: {release["tag_name"]}')
+            rq = requests.get(asset['browser_download_url'])
+            if rq.status_code != 200:
+               print(f'Error {rq.status_code}!')
+               print(rq.text)
+               return False
+            temp_folder = tempfile.mkdtemp()
+            temp_zip = os.path.join(temp_folder, f'{date_key}.zip')
+            with open(temp_zip, 'wb') as file:
+               file.write(rq.content)
+            with zipfile.ZipFile(temp_zip, 'r') as zip:
+               if top_level is None:
+                  zip.extractall(destination_folder)
+               else:
+                  temp_extract = os.path.join(temp_folder, date_key)
+                  zip.extractall(temp_extract)
+                  shutil.copytree(os.path.join(temp_extract, top_level), openkh_folder, dirs_exist_ok=True)
+            settings['downloads'][date_key] = asset_date.isoformat()
+            return True
+      return False
+
+   openkh_folder = settings['mods'].get('openkh')
+   mods_folder = settings['mods'].get('mods')
+   if openkh_folder is not None:
+      mods_manager = os.path.join(openkh_folder, 'mods-manager.yml')
+      print('Checking for OpenKH updates...')
+      downloaded = download_latest('openkh', 'https://api.github.com/repos/OpenKH/OpenKh/releases/tags/latest', lambda x: x['name'] == 'openkh.zip', 'openkh', openkh_folder)
+      if downloaded and not os.path.exists(mods_manager):
+         print('Creating default OpenKH mod manager configuration')
+         with open(mods_manager, 'w') as mods_file:
+            yaml.dump({"gameEdition":2}, mods_file)
       if os.path.exists(openkh_folder):
          if settings['mods'].get('panacea'):
             if kh15_folder is not None:
@@ -137,48 +161,9 @@ def main():
                with open(mods_manager, 'w') as mods_file:
                   yaml.dump(mods_data, mods_file)
 
-      mod_changes = {'KH-ReFined/KH2-MAIN': False, 'KH-ReFined/KH2-VanillaOST': False, 'KH-ReFined/KH2-VanillaEnemy': False, 'KH-ReFined/KH2-MultiAudio': False, 'KH2FM-Mods-Num/GoA-ROM-Edition': False}
-      if (refined_folder := settings['mods'].get('refined')) is not None:
-         print('Checking for ReFined updates...')
-         date = settings['downloads'].get('refined')
-         if date is not None:
-            date = datetime.datetime.fromisoformat(date)
-         rq = requests.get('https://api.github.com/repos/TopazTK/KH-ReFined/releases')
-         if rq.status_code != 200:
-            print(f'Error {rq.status_code}!')
-            try:
-               print(json.loads(rq.text)['message'])
-            except:
-               print(rq.text)
-         else:
-            newest = None
-            for release in json.loads(rq.text):
-               for asset in release['assets']:
-                  if asset['name'].endswith('.zip'):
-                     asset_date = datetime.datetime.fromisoformat(asset['updated_at'])
-                     if newest is None or asset_date > newest[0]:
-                        newest = (asset_date, release, asset)
-            if newest is not None and (date is None or newest[0] > date):
-               print(f'Downloading update: {newest[1]["tag_name"]}')
-               rq = requests.get(newest[2]['browser_download_url'])
-               if rq.status_code != 200:
-                  print(f'Error {rq.status_code}!')
-                  print(rq.text)
-               else:
-                  with open('/tmp/refined.zip', 'wb') as file:
-                     file.write(rq.content)
-                  with zipfile.ZipFile('/tmp/refined.zip', 'r') as zip:
-                     zip.extractall(refined_folder)
-                  settings['downloads']['refined'] = newest[0].isoformat()
-         if os.path.exists(refined_folder) and kh15_folder is not None:
-            symlinks[os.path.join(kh15_folder, 'x64')] = (os.path.join(refined_folder, 'x64'), True)
-            symlinks[os.path.join(kh15_folder, 'Keystone.Net.dll')] = (os.path.join(refined_folder, 'Keystone.Net.dll'), False)
-            symlinks[os.path.join(kh15_folder, 'KINGDOM HEARTS II FINAL MIX.exe')] = (os.path.join(refined_folder, 'KINGDOM HEARTS II FINAL MIX.exe'), False)
-            if (refined_ini := settings['mods'].get('refined_config')) is not None:
-               symlinks[os.path.join(kh15_folder, 'reFined.ini')] = (refined_ini, False)
-            backup_vanilla = True
-
       def update_mod(repo):
+         if openkh_folder is None:
+            return
          print(f'Checking for updates to {repo} mod')
          if mods_folder is not None:
             patch_folder = os.path.join(mods_folder, f'kh2/{repo}')
@@ -190,39 +175,10 @@ def main():
             subprocess.run(['git', 'pull', '--recurse-submodules'], cwd=patch_folder)
          mod_changes[repo] = True
 
-      if (randomizer_folder := settings['mods'].get('randomizer')) is not None:
-         update_mod('KH2FM-Mods-Num/GoA-ROM-Edition')
-         print('Checking for Randomizer updates...')
-         date = settings['downloads'].get('randomizer')
-         if date is not None:
-            date = datetime.datetime.fromisoformat(date)
-         rq = requests.get('https://api.github.com/repos/tommadness/KH2Randomizer/releases/latest')
-         if rq.status_code != 200:
-            print(f'Error {rq.status_code}!')
-            try:
-               print(json.loads(rq.text)['message'])
-            except:
-               print(rq.text)
-         else:
-            release = json.loads(rq.text)
-            for asset in release['assets']:
-               if asset['name'] == 'Kingdom.Hearts.II.Final.Mix.Randomizer.zip':
-                  asset_date = datetime.datetime.fromisoformat(asset['updated_at'])
-                  if date is None or asset_date > date:
-                     print(f'Downloading update: {release["tag_name"]}')
-                     rq = requests.get(asset['browser_download_url'])
-                     if rq.status_code != 200:
-                        print(f'Error {rq.status_code}!')
-                        print(rq.text)
-                     else:
-                        with open('/tmp/randomizer.zip', 'wb') as file:
-                           file.write(rq.content)
-                        with zipfile.ZipFile('/tmp/randomizer.zip', 'r') as zip:
-                           zip.extractall(randomizer_folder)
-                        settings['downloads']['randomizer'] = asset_date.isoformat()
-                     break
-
-      if os.path.exists(openkh_folder):
+      mod_changes = {'KH-ReFined/KH2-MAIN': False, 'KH-ReFined/KH2-VanillaOST': False, 'KH-ReFined/KH2-VanillaEnemy': False, 'KH-ReFined/KH2-MultiAudio': False, 'KH2FM-Mods-Num/GoA-ROM-Edition': False}
+      if (refined_folder := settings['mods'].get('refined')) is not None:
+         print('Checking for ReFined updates...')
+         download_latest('refined', 'https://api.github.com/repos/TopazTK/KH-ReFined/releases', lambda x: x['name'].endswith('.zip'), None, refined_folder)
          update_mod('KH-ReFined/KH2-MAIN')
          if settings['mods'].get('refined.vanilla_ost'):
             update_mod('KH-ReFined/KH2-VanillaOST')
@@ -230,6 +186,20 @@ def main():
             update_mod('KH-ReFined/KH2-VanillaEnemy')
          if settings['mods'].get('refined.multi_audio'):
             update_mod('KH-ReFined/KH2-MultiAudio')
+         if os.path.exists(refined_folder) and kh15_folder is not None:
+            symlinks[os.path.join(kh15_folder, 'x64')] = (os.path.join(refined_folder, 'x64'), True)
+            symlinks[os.path.join(kh15_folder, 'Keystone.Net.dll')] = (os.path.join(refined_folder, 'Keystone.Net.dll'), False)
+            symlinks[os.path.join(kh15_folder, 'KINGDOM HEARTS II FINAL MIX.exe')] = (os.path.join(refined_folder, 'KINGDOM HEARTS II FINAL MIX.exe'), False)
+            if (refined_ini := settings['mods'].get('refined_config')) is not None:
+               symlinks[os.path.join(kh15_folder, 'reFined.ini')] = (refined_ini, False)
+            backup_vanilla = True
+
+      if (randomizer_folder := settings['mods'].get('randomizer')) is not None:
+         print('Checking for Randomizer updates...')
+         download_latest('randomizer', 'https://api.github.com/repos/tommadness/KH2Randomizer/releases/latest', lambda x: x['name'] == 'Kingdom.Hearts.II.Final.Mix.Randomizer.zip', None, randomizer_folder)
+         update_mod('KH2FM-Mods-Num/GoA-ROM-Edition')
+
+      if os.path.exists(openkh_folder):
          enabled_mods = []
          enabled_mods_path = os.path.join(openkh_folder, 'mods-KH2.txt')
          if os.path.exists(enabled_mods_path):
@@ -253,40 +223,14 @@ def main():
 
       if (lua_folder := settings['mods'].get('luabackend')) is not None:
          print('Checking for LuaBackend updates...')
-         date = settings['downloads'].get('luabackend')
-         if date is not None:
-            date = datetime.datetime.fromisoformat(date)
          toml_user = settings['mods'].get('luabackend_config')
-         rq = requests.get('https://api.github.com/repos/Sirius902/LuaBackend/releases/latest')
-         if rq.status_code != 200:
-            print(f'Error {rq.status_code}!')
-            try:
-               print(json.loads(rq.text)['message'])
-            except:
-               print(rq.text)
-         else:
-            release = json.loads(rq.text)
-            for asset in release['assets']:
-               if asset['name'] == 'DBGHELP.zip':
-                  asset_date = datetime.datetime.fromisoformat(asset['updated_at'])
-                  if date is None or asset_date > date:
-                     print(f'Downloading update: {release["tag_name"]}')
-                     rq = requests.get(asset['browser_download_url'])
-                     if rq.status_code != 200:
-                        print(f'Error {rq.status_code}!')
-                        print(rq.text)
-                     else:
-                        with open('/tmp/luabackend.zip', 'wb') as file:
-                           file.write(rq.content)
-                        with zipfile.ZipFile('/tmp/luabackend.zip', 'r') as zip:
-                           zip.extractall(lua_folder)
-                        toml_default = os.path.join(lua_folder, 'LuaBackend.toml')
-                        if toml_user is not None and not os.path.exists(toml_user):
-                           print('Creating default LuaBackend.toml configuration')
-                           shutil.copyfile(toml_default, toml_user)
-                        os.remove(toml_default)
-                        settings['downloads']['luabackend'] = asset_date.isoformat()
-                     break
+         downloaded = download_latest('luabackend', 'https://api.github.com/repos/Sirius902/LuaBackend/releases/latest', lambda x: x['name'] == 'DBGHELP.zip', None, lua_folder)
+         if downloaded:
+            toml_default = os.path.join(lua_folder, 'LuaBackend.toml')
+            if toml_user is not None and not os.path.exists(toml_user):
+               print('Creating default LuaBackend.toml configuration')
+               shutil.copyfile(toml_default, toml_user)
+            os.remove(toml_default)
          if os.path.exists(lua_folder):
             if kh15_folder is not None:
                symlinks[os.path.join(kh15_folder, 'DINPUT8.dll')] = (os.path.join(lua_folder, 'DBGHELP.dll'), False)
