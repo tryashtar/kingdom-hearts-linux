@@ -10,6 +10,7 @@ import yaml
 import tempfile
 import sqlite3
 import time
+import tarfile
 
 def main():
    settings_path = os.path.join(os.path.dirname(__file__), 'settings.json')
@@ -25,31 +26,71 @@ def main():
    khmom_folder = settings['installs'].get('mom')
 
    if settings.get('lutris'):
-      db_path = os.path.expanduser('~/.local/share/lutris/pga.db')
+      lutris_local = os.path.expanduser('~/.local/share/lutris')
+      lutris_config = os.path.expanduser('~/.config/lutris')
+      print('Checking for Lutris runner updates...')
+      runner_name = None
+      rq = requests.get('https://lutris.net/api/runners/wine?format=json')
+      if rq.status_code != 200:
+         print(f'Error {rq.status_code}!')
+         print(rq.text)
+      else:
+         for runner in json.loads(rq.text)['versions']:
+            if not runner['default']:
+               continue
+            runner_parent = os.path.join(lutris_local, 'runners/wine')
+            runner_name = runner['version'] + '-' + runner['architecture']
+            runner_dest = os.path.join(runner_parent, runner_name)
+            if os.path.exists(runner_dest):
+               break
+            print(f'Downloading runner {runner["version"]}')
+            rq = requests.get(runner['url'])
+            if rq.status_code != 200:
+               print(f'Error {rq.status_code}!')
+               print(rq.text)
+               runner_name = None
+            else:
+               temp_folder = tempfile.mkdtemp()
+               temp_zip = os.path.join(temp_folder, f'{runner["version"]}.tar.xz')
+               with open(temp_zip, 'wb') as file:
+                  file.write(rq.content)
+               with tarfile.open(temp_zip) as zip:
+                  temp_extract = os.path.join(temp_folder, runner['version'])
+                  zip.extractall(temp_extract)
+                  shutil.copytree(os.path.join(temp_extract, os.listdir(temp_extract)[0]), runner_dest, dirs_exist_ok=True)
+            break
+      db_path = os.path.join(lutris_local, 'pga.db')
       if os.path.exists(db_path):
          database = sqlite3.connect(db_path)
-         config_folder = os.path.expanduser('~/.config/lutris/games')
 
          def install_game(id, name, path):
-            config_path = os.path.join(config_folder, id + '.yml')
+            config_path = os.path.join(lutris_config, 'games', id + '.yml')
             if os.path.exists(config_path):
                changes = False
                with open(config_path, 'r') as config_file:
                   data = yaml.safe_load(config_file)
                if data['game']['exe'] != path:
+                  print(f'Updating \'{name}\' executable in Lutris from \'{data["game"]["exe"]}\' to \'{path}\'')
                   data['game']['exe'] = path
                   changes = True
                if data['game']['prefix'] != settings['wineprefix']:
+                  print(f'Updating \'{name}\' wineprefix in Lutris from \'{data["game"]["prefix"]}\' to \'{settings["wineprefix"]}\'')
                   data['game']['prefix'] = settings['wineprefix']
                   changes = True
+               if runner_name is not None and data['wine'].get('version') != runner_name:
+                  print(f'Updating \'{name}\' runner in Lutris from \'{data["wine"]["version"]}\' to \'{runner_name}\'')
+                  data['wine']['version'] = runner_name
+                  changes = True
                if changes:
-                  print(f'Updating \'{name}\' config in Lutris')
                   with open(config_path, 'w') as config_file:
                      yaml.dump(data, config_file)
             else:
                print(f'Adding \'{name}\' to Lutris')
                with open(config_path, 'w') as config_file:
-                  yaml.dump({"game":{"exe":path,"prefix":settings['wineprefix']},"system":{},"wine":{}}, config_file)
+                  cfg = {"game":{"exe":path,"prefix":settings['wineprefix']},"system":{},"wine":{}}
+                  if runner_name is not None:
+                     cfg['wine']['version'] = runner_name
+                  yaml.dump(cfg, config_file)
                data = {"name":name,"slug":id,"platform":"Windows","runner":"wine","directory":"","installed":1,"installed_at":int(time.time()),"configpath":id,"hidden":0}
                cursor = database.cursor()
                columns = ', '.join(list(data.keys()))
