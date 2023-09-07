@@ -8,9 +8,9 @@ import datetime
 import tomlkit
 import yaml
 import tempfile
-import sqlite3
-import time
 import tarfile
+import stat
+import copy
 
 def main():
    settings_path = os.path.join(os.path.dirname(__file__), 'settings.yaml')
@@ -30,71 +30,32 @@ def main():
    kh28_folder = settings['installs']['kh2.8']
    kh3_folder = settings['installs']['kh3']
    khmom_folder = settings['installs']['khmom']
+   kh2launch = settings['installs'].get('kh2.exe')
    wineprefix = settings['wineprefix']
    runner = settings['runner']
 
    print('Checking for runner updates...')
    new_runner = download_latest(settings, 'runner', 'https://api.github.com/repos/GloriousEggroll/wine-ge-custom/releases/latest', lambda x: x['name'].endswith('.tar.xz'), True, settings['runner'], True)
 
-   if settings.get('lutris') == True:
-      lutris_config = os.path.expanduser('~/.config/lutris')
-      lutris_local = os.path.expanduser('~/.local/share/lutris')
-      symlinks[os.path.join(lutris_local, 'runners/wine/kingdom-hearts-x86_64')] = (runner, True)
-      db_path = os.path.join(lutris_local, 'pga.db')
-      if os.path.exists(db_path):
-         database = sqlite3.connect(db_path)
-         if kh15_folder is not None:
-            install_game_lutris(settings, lutris_config, database, wineprefix, 'kingdom-hearts-final-mix', 'Kingdom Hearts Final Mix', os.path.join(kh15_folder, 'KINGDOM HEARTS FINAL MIX.exe'), True, True)
-            install_game_lutris(settings, lutris_config, database, wineprefix, 'kingdom-hearts-ii-final-mix', 'Kingdom Hearts II Final Mix', os.path.join(kh15_folder, 'KINGDOM HEARTS II FINAL MIX.exe'), True, True)
-            install_game_lutris(settings, lutris_config, database, wineprefix, 'kingdom-hearts-re-chain-of-memories', 'Kingdom Hearts Re:Chain of Memories', os.path.join(kh15_folder, 'KINGDOM HEARTS Re_Chain of Memories.exe'), True, True)
-            install_game_lutris(settings, lutris_config, database, wineprefix, 'kingdom-hearts-birth-by-sleep-final-mix', 'Kingdom Hearts Birth by Sleep Final Mix', os.path.join(kh15_folder, 'KINGDOM HEARTS Birth by Sleep FINAL MIX.exe'), True, True)
-         if kh28_folder is not None:
-            install_game_lutris(settings, lutris_config, database, wineprefix, 'kingdom-hearts-3d-dream-drop-distance', 'Kingdom Hearts 3D: Dream Drop Distance', os.path.join(kh28_folder, 'KINGDOM HEARTS Dream Drop Distance.exe'), False, True)
-            install_game_lutris(settings, lutris_config, database, wineprefix, 'kingdom-hearts-02-birth-by-sleep-a-fragmentary-passage', 'Kingdom Hearts 0.2 Birth by Sleep -A fragmentary passage-', os.path.join(kh28_folder, 'KINGDOM HEARTS HD 2.8 Final Chapter Prologue.exe'), False, False)
-         if kh3_folder is not None:
-            install_game_lutris(settings, lutris_config, database, wineprefix, 'kingdom-hearts-iii', 'Kingdom Hearts III', os.path.join(kh3_folder, 'KINGDOM HEARTS III/Binaries/Win64/KINGDOM HEARTS III.exe'), False, False)
-         if khmom_folder is not None:
-            install_game_lutris(settings, lutris_config, database, wineprefix, 'kingdom-hearts-melody-of-memory', 'Kingdom Hearts Melody of Memory', os.path.join(khmom_folder, 'KINGDOM HEARTS Melody of Memory.exe'), False, False)
-
-   symlinks[os.path.join(wineprefix, 'pfx')] = None
-   if settings.get('heroic') == True:
-      symlinks[os.path.join(wineprefix, 'pfx')] = (wineprefix, True)
-      heroic_config = os.path.expanduser('~/.config/heroic')
-      library_path = os.path.join(heroic_config, 'sideload_apps/library.json')
-      if not os.path.exists(library_path):
-         with open(library_path, 'w') as library_file:
-            json.dump({"games":[]}, library_file)
-      changes = False
-      with open(library_path, 'r') as library_file:
-         library = json.load(library_file)
-         if kh15_folder is not None:
-            changes |= install_game_heroic(settings, heroic_config, library, wineprefix, runner, 'kingdom-hearts-final-mix', 'Kingdom Hearts Final Mix', os.path.join(kh15_folder, 'KINGDOM HEARTS FINAL MIX.exe'), True, True)
-            changes |= install_game_heroic(settings, heroic_config, library, wineprefix, runner, 'kingdom-hearts-ii-final-mix', 'Kingdom Hearts II Final Mix', os.path.join(kh15_folder, 'KINGDOM HEARTS II FINAL MIX.exe'), True, True)
-            changes |= install_game_heroic(settings, heroic_config, library, wineprefix, runner, 'kingdom-hearts-re-chain-of-memories', 'Kingdom Hearts Re:Chain of Memories', os.path.join(kh15_folder, 'KINGDOM HEARTS Re_Chain of Memories.exe'), True, True)
-            changes |= install_game_heroic(settings, heroic_config, library, wineprefix, runner, 'kingdom-hearts-birth-by-sleep-final-mix', 'Kingdom Hearts Birth by Sleep Final Mix', os.path.join(kh15_folder, 'KINGDOM HEARTS Birth by Sleep FINAL MIX.exe'), True, True)
-         if kh28_folder is not None:
-            changes |= install_game_heroic(settings, heroic_config, library, wineprefix, runner, 'kingdom-hearts-3d-dream-drop-distance', 'Kingdom Hearts 3D: Dream Drop Distance', os.path.join(kh28_folder, 'KINGDOM HEARTS Dream Drop Distance.exe'), False, True)
-            changes |= install_game_heroic(settings, heroic_config, library, wineprefix, runner, 'kingdom-hearts-02-birth-by-sleep-a-fragmentary-passage', 'Kingdom Hearts 0.2 Birth by Sleep -A fragmentary passage-', os.path.join(kh28_folder, 'KINGDOM HEARTS HD 2.8 Final Chapter Prologue.exe'), False, False)
-         if kh3_folder is not None:
-            changes |= install_game_heroic(settings, heroic_config, library, wineprefix, runner, 'kingdom-hearts-iii', 'Kingdom Hearts III', os.path.join(kh3_folder, 'KINGDOM HEARTS III/Binaries/Win64/KINGDOM HEARTS III.exe'), False, False)
-         if khmom_folder is not None:
-            changes |= install_game_heroic(settings, heroic_config, library, wineprefix, runner, 'kingdom-hearts-melody-of-memory', 'Kingdom Hearts Melody of Memory', os.path.join(khmom_folder, 'KINGDOM HEARTS Melody of Memory.exe'), False, False)
-      if changes:
-         with open(library_path, 'w') as library_file:
-            json.dump(library, library_file)
-   
    user_folder = os.path.join(wineprefix, 'drive_c/users', os.getlogin())
    if not os.path.exists(user_folder):
       print('Initializing wineprefix')
       os.makedirs(wineprefix, exist_ok=True)
       subprocess.run('wineboot', env=dict(os.environ, WINEPREFIX=wineprefix), check=True)
-   if settings['mods'].get('refined') is not None and not os.path.exists(os.path.join(wineprefix, 'drive_c/windows/dotnet48.installed.workaround')):
-      print('Installing dotnet to wineprefix')
+   winetricks = []
+   if os.path.exists(os.path.join(wineprefix, 'winetricks.log')):
+      with open(os.path.join(wineprefix, 'winetricks.log'), 'r') as winetricks_file:
+         winetricks = [line.rstrip('\n') for line in winetricks_file]
+   if settings['mods'].get('refined') is not None and 'dotnet48' not in winetricks:
+      print('Installing dotnet to wineprefix (this will take some time)')
       subprocess.run(['winetricks', '-q', 'dotnet20', 'dotnet48'], env=dict(os.environ, WINEPREFIX=wineprefix), check=True)
+   if 'vkd3d' not in winetricks:
+      print('Installing VKD3D to wineprefix')
+      subprocess.run(['winetricks', '-q', 'dxvk', 'vkd3d'], env=dict(os.environ, WINEPREFIX=wineprefix), check=True)
    if (kh3_folder is not None or kh28_folder is not None) and (new_runner or not os.path.exists(os.path.join(wineprefix, 'drive_c/windows/system32/sqmapi.dll'))):
       print('Running mf-install to fix KH3/KH2.8')
       mfinstall_folder = tempfile.mkdtemp()
-      subprocess.run(['git', 'clone', 'https://github.com/z0z0z/mf-install', mfinstall_folder], check=True)
+      subprocess.run(['git', 'clone', 'https://github.com/84KaliPleXon3/mf-install', mfinstall_folder], check=True)
       env = os.environ.copy()
       env['PATH'] = f'{runner}/bin:{env["PATH"]}'
       env['WINEPREFIX'] = wineprefix
@@ -133,7 +94,8 @@ def main():
          os.rename(epic_folder, os.path.join(kh15_folder, 'EPIC.bak'))
       symlinks[os.path.join(kh15_folder, 'x64')] = None
       symlinks[os.path.join(kh15_folder, 'Keystone.Net.dll')] = None
-      symlinks[os.path.join(kh15_folder, 'KINGDOM HEARTS II FINAL MIX.exe')] = None
+      if kh2launch is not None:
+         symlinks[kh2launch] = None
       symlinks[os.path.join(kh15_folder, 'reFined.ini')] = None
       symlinks[os.path.join(kh15_folder, 'version.dll')] = None
       symlinks[os.path.join(kh15_folder, 'panacea_settings.txt')] = None
@@ -165,7 +127,7 @@ def main():
                print('Creating default panacea configuration')
                with open(pana_settings, 'w') as pana_file:
                   mod_path = os.path.join(openkh_folder, 'mod')
-                  pana_file.write('mod_path=Z:' + mod_path.replace('/', '\\') + '\nshow_console=False')
+                  pana_file.write('mod_path="Z:' + mod_path.replace('/', '\\') + '"\nshow_console=False')
       if os.path.exists(openkh_folder):
          if settings['mods'].get('panacea') == True and kh15_folder is not None:
             symlinks[os.path.join(kh15_folder, 'version.dll')] = (os.path.join(openkh_folder, 'OpenKH.Panacea.dll'), False)
@@ -219,7 +181,8 @@ def main():
          if os.path.exists(refined_folder) and kh15_folder is not None:
             symlinks[os.path.join(kh15_folder, 'x64')] = (os.path.join(refined_folder, 'x64'), True)
             symlinks[os.path.join(kh15_folder, 'Keystone.Net.dll')] = (os.path.join(refined_folder, 'Keystone.Net.dll'), False)
-            symlinks[os.path.join(kh15_folder, 'KINGDOM HEARTS II FINAL MIX.exe')] = (os.path.join(refined_folder, 'KINGDOM HEARTS II FINAL MIX.exe'), False)
+            if kh2launch is not None:
+               symlinks[kh2launch] = (os.path.join(refined_folder, 'KINGDOM HEARTS II FINAL MIX.exe'), False)
             if (refined_ini := settings['mods'].get('refined_config')) is not None:
                symlinks[os.path.join(kh15_folder, 'reFined.ini')] = (refined_ini, False)
             backup_vanilla = True
@@ -301,13 +264,12 @@ def main():
             with open(toml_user, 'w') as toml_file:
                tomlkit.dump(toml_data, toml_file)
    
-   if kh15_folder is not None:
+   if kh15_folder is not None and kh2launch is not None:
       backup_path = os.path.join(kh15_folder, 'KINGDOM HEARTS II FINAL MIX VANILLA.exe')
-      launch_path = os.path.join(kh15_folder, 'KINGDOM HEARTS II FINAL MIX.exe')
       if backup_vanilla:
          if not os.path.exists(backup_path):
             print('Moving vanilla KH2 executable')
-            os.rename(launch_path, backup_path)
+            os.rename(kh2launch, backup_path)
 
    for (new, old) in symlinks.items():
       if old is None:
@@ -316,16 +278,46 @@ def main():
          path, dir = old
          symlink(path, new, is_dir=dir)
 
-   if kh15_folder is not None:
+   if kh15_folder is not None and kh2launch is not None:
       backup_path = os.path.join(kh15_folder, 'KINGDOM HEARTS II FINAL MIX VANILLA.exe')
-      launch_path = os.path.join(kh15_folder, 'KINGDOM HEARTS II FINAL MIX.exe')
       if not backup_vanilla:
-         if os.path.exists(backup_path) and not os.path.exists(launch_path):
+         if os.path.exists(backup_path) and not os.path.exists(kh2launch):
             print('Restoring vanilla KH2 executable')
-            os.rename(backup_path, launch_path)
+            os.rename(backup_path, kh2launch)
+
+   def make_launch(name, folder, has_panacea, has_luabackend):
+      path = settings['launch'].get(name)
+      if path is None:
+         return
+      exe = settings['installs'].get(name + '.exe')
+      if exe is None:
+         return
+      os.makedirs(os.path.dirname(path), exist_ok=True)
+      dlls = []
+      if has_panacea and settings['mods'].get('panacea') == True:
+         dlls.append('version=n,b')
+      if has_luabackend and settings['mods'].get('luabackend') is not None:
+         dlls.append('dinput8=n,b')
+      if len(dlls) == 0:
+         overrides = ''
+      else:
+         overrides = f'WINEDLLOVERRIDES="{";".join(dlls)}" '
+      with open(path, 'w') as sh_file:
+         sh_file.write(f'#!/bin/sh\ncd "{folder}" || exit 1\nWINEPREFIX="{wineprefix}" {overrides}"{runner}/bin/wine" "{exe}"\n')
+      st = os.stat(path)
+      os.chmod(path, st.st_mode | stat.S_IEXEC)
+
+   make_launch('kh1', settings['installs']['kh1.5+2.5'], True, True)
+   make_launch('kh2', settings['installs']['kh1.5+2.5'], True, True)
+   make_launch('khrecom', settings['installs']['kh1.5+2.5'], True, True)
+   make_launch('khbbs', settings['installs']['kh1.5+2.5'], True, True)
+   make_launch('khddd', settings['installs']['kh2.8'], False, True)
+   make_launch('kh0.2', settings['installs']['kh2.8'], False, False)
+   make_launch('kh3', settings['installs']['kh3'], False, False)
+   make_launch('khmom', settings['installs']['khmom'], False, False)
 
    with open(settings_path, 'w') as data_file:
-      yaml.dump(settings, data_file, sort_keys=False)
+      yaml.dump(settings, data_file, sort_keys=False, width=1000)
 
 
 def download_latest(settings, date_key, url, filter, has_extra_folder, destination_folder, is_tar):
@@ -339,6 +331,8 @@ def download_latest(settings, date_key, url, filter, has_extra_folder, destinati
          print(json.loads(rq.text)['message'])
       except:
          print(rq.text)
+      if not os.path.exists(destination_folder):
+         rq.raise_for_status()
       return False
    if url.endswith('/releases'):
       newest = None
@@ -363,6 +357,8 @@ def download_latest(settings, date_key, url, filter, has_extra_folder, destinati
          if rq.status_code != 200:
             print(f'Error {rq.status_code}!')
             print(rq.text)
+            if not os.path.exists(destination_folder):
+               rq.raise_for_status()
             return False
          temp_folder = tempfile.mkdtemp()
          temp_zip = os.path.join(temp_folder, f'{date_key}.zip')
@@ -380,127 +376,6 @@ def download_latest(settings, date_key, url, filter, has_extra_folder, destinati
          return True
    return False
 
-def install_game_heroic(settings, config_folder, library, wineprefix, runner, id, name, path, has_panacea, has_luabackend):
-   game_path = os.path.join(config_folder, 'GamesConfig', f'{id}.json')
-   if not os.path.exists(game_path):
-      print(f'Adding \'{name}\' to Heroic')
-      with open(game_path, 'w') as game_file:
-         json.dump({id:{"wineVersion":{"name":"Kingdom Hearts Runner","type":"wine"}},"explicit":True}, game_file)
-   changes = False
-   with open(game_path, 'r') as game_file:
-      data = json.load(game_file)
-   if 'bin' not in data[id]['wineVersion'] or data[id]['wineVersion']['bin'] != os.path.join(runner, 'bin/wine'):
-      print(f'Updating \'{name}\' runner in Heroic to \'{runner}\'')
-      data[id]['wineVersion']['bin'] = os.path.join(runner, 'bin/wine')
-      data[id]['wineVersion']['wineserver'] = os.path.join(runner, 'bin/wineserver')
-      data[id]['wineVersion']['wineboot'] = os.path.join(runner, 'bin/wineboot')
-      changes = True
-   if 'winePrefix' not in data[id] or data[id]['winePrefix'] != wineprefix:
-      print(f'Updating \'{name}\' wineprefix in Heroic to \'{wineprefix}\'')
-      data[id]['winePrefix'] = wineprefix
-      changes = True
-   overrides = []
-   if 'environmentOptions' in data[id]:
-      for opt in data[id]['environmentOptions']:
-         if opt['key'] == 'WINEDLLOVERRIDES':
-            overrides = opt['value'].split(';')
-            data[id]['environmentOptions'].remove(opt)
-            break
-   if has_panacea:
-      pana = settings['mods'].get('panacea') == True
-      if pana and 'version=n,b' not in overrides:
-         print(f'Adding Panacea DLL override in Heroic for \'{name}\'')
-         overrides.append('version=n,b;')
-         changes = True
-      if not pana and 'version=n,b' in overrides:
-         print(f'Removing Panacea DLL override from Heroic for \'{name}\'')
-         overrides.remove('version=n,b;')
-         changes = True
-   if has_luabackend:
-      lua = settings['mods'].get('luabackend') is not None
-      if lua and 'dinput8=n,b' not in overrides:
-         print(f'Adding LuaBackend DLL override in Heroic for \'{name}\'')
-         overrides.append('dinput8=n,b;')
-         changes = True
-      if not lua and 'dinput8=n,b' in overrides:
-         print(f'Removing LuaBackend DLL override from Heroic for \'{name}\'')
-         overrides.remove('dinput8=n,b;')
-         changes = True
-   if len(overrides) > 0:
-      if 'environmentOptions' not in data[id]:
-         data[id]['environmentOptions'] = []
-      data[id]['environmentOptions'].append({"key":"WINEDLLOVERRIDES","value":';'.join(overrides)})
-   if changes:
-      with open(game_path, 'w') as game_file:
-         json.dump(data, game_file)
-   game = None
-   library_changes = False
-   for entry in library['games']:
-      if entry['app_name'] == id:
-         game = entry
-         break
-   if game is None:
-      game = {"runner":"sideload","app_name":id,"title":name,"install":{"platform":"Windows","is_dlc":False},"folder_name":os.path.dirname(path),"is_installed":True,"canRunOffline":True}
-      library['games'].append(game)
-      library_changes = True
-   if 'executable' not in game['install'] or game['install']['executable'] != path:
-      print(f'Updating \'{name}\' executable in Heroic to \'{path}\'')
-      game['install']['executable'] = path
-   return library_changes
-
-def install_game_lutris(settings, config_folder, database, wineprefix, id, name, path, has_panacea, has_luabackend):
-   config_path = os.path.join(config_folder, 'games', id + '.yml')
-   if not os.path.exists(config_path):
-      print(f'Adding \'{name}\' to Lutris')
-      with open(config_path, 'w') as config_file:
-         yaml.dump({"game":{},"system":{},"wine":{"version":"kingdom-hearts-x86_64"}}, config_file)
-      data = {"name":name,"slug":id,"platform":"Windows","runner":"wine","directory":"","installed":1,"installed_at":int(time.time()),"configpath":id,"hidden":0}
-      cursor = database.cursor()
-      columns = ', '.join(list(data.keys()))
-      placeholders = ("?, " * len(data))[:-2]
-      values = tuple(data.values())
-      cursor.execute(f'INSERT INTO games({columns}) VALUES ({placeholders})', values)
-      database.commit()
-      cursor.close()
-   changes = False
-   with open(config_path, 'r') as config_file:
-      data = yaml.safe_load(config_file)
-   if 'exe' not in data['game'] or data['game']['exe'] != path:
-      print(f'Updating \'{name}\' executable in Lutris to \'{path}\'')
-      data['game']['exe'] = path
-      changes = True
-   if 'prefix' not in data['game'] or data['game']['prefix'] != wineprefix:
-      print(f'Updating \'{name}\' wineprefix in Lutris to \'{wineprefix}\'')
-      data['game']['prefix'] = wineprefix
-      changes = True
-   if has_panacea:
-      pana = settings['mods'].get('panacea') == True
-      if pana and ('overrides' not in data['wine'] or 'version' not in data['wine']['overrides']):
-         print(f'Adding Panacea DLL override in Lutris for \'{name}\'')
-         if 'overrides' not in data['wine']:
-            data['wine']['overrides'] = {}
-         data['wine']['overrides']['version'] = 'native,builtin'
-         changes = True
-      if not pana and 'overrides' in data['wine'] and 'version' in data['wine']['overrides']:
-         print(f'Removing Panacea DLL override from Lutris for \'{name}\'')
-         del data['wine']['overrides']['version']
-         changes = True
-   if has_luabackend:
-      lua = settings['mods'].get('luabackend') is not None
-      if lua and ('overrides' not in data['wine'] or 'dinput8' not in data['wine']['overrides']):
-         if 'overrides' not in data['wine']:
-            data['wine']['overrides'] = {}
-         print(f'Adding LuaBackend DLL override in Lutris for \'{name}\'')
-         data['wine']['overrides']['dinput8'] = 'native,builtin'
-         changes = True
-      if not lua and 'overrides' in data['wine'] and 'dinput8' in data['wine']['overrides']:
-         print(f'Removing LuaBackend DLL override from Lutris for \'{name}\'')
-         del data['wine']['overrides']['dinput8']
-         changes = True
-   if changes:
-      with open(config_path, 'w') as config_file:
-         yaml.dump(data, config_file, sort_keys=False)
-
 def get_settings(settings_path):
    if os.path.exists(settings_path):
       with open(settings_path, 'r') as data_file:
@@ -510,7 +385,7 @@ def get_settings(settings_path):
       print('You\'ll be asked some questions about your setup. Every time you run this script, everything will be updated according to your answers. You can change them at any time by editing or deleting settings.yaml. Anything you disable later will be seamlessly reverted; all changes made by this script are reversible.')
       print()
       settings = {}
-   old_settings = settings.copy()
+   old_settings = copy.deepcopy(settings)
 
    if 'installs' not in settings:
       settings['installs'] = {}
@@ -531,6 +406,15 @@ def get_settings(settings_path):
          break
       settings['installs']['kh1.5+2.5'] = install
       print()
+   if (install := settings['installs']['kh1.5+2.5']) is not None:
+      if 'kh1.exe' not in settings['installs']:
+         settings['installs']['kh1.exe'] = os.path.join(install, 'KINGDOM HEARTS FINAL MIX.exe')
+      if 'kh2.exe' not in settings['installs']:
+         settings['installs']['kh2.exe'] = os.path.join(install, 'KINGDOM HEARTS II FINAL MIX.exe')
+      if 'khrecom.exe' not in settings['installs']:
+         settings['installs']['khrecom.exe'] = os.path.join(install, 'KINGDOM HEARTS Re_Chain of Memories.exe')
+      if 'khbbs.exe' not in settings['installs']:
+         settings['installs']['khbbs.exe'] = os.path.join(install, 'KINGDOM HEARTS Birth by Sleep FINAL MIX.exe')
    if 'kh2.8' not in settings['installs']:
       print('Kingdom Hearts HD 2.8 Final Chapter Prologue:')
       while True:
@@ -545,6 +429,11 @@ def get_settings(settings_path):
          break
       settings['installs']['kh2.8'] = install
       print()
+   if (install := settings['installs']['kh2.8']) is not None:
+      if 'khddd.exe' not in settings['installs']:
+         settings['installs']['khddd.exe'] = os.path.join(install, 'KINGDOM HEARTS Dream Drop Distance.exe')
+      if 'kh0.2.exe' not in settings['installs']:
+         settings['installs']['kh0.2.exe'] = os.path.join(install, 'KINGDOM HEARTS 0.2 Birth by Sleep/Binaries/Win64/KINGDOM HEARTS 0.2 Birth by Sleep.exe')
    if 'kh3' not in settings['installs']:
       print('Kingdom Hearts III:')
       while True:
@@ -559,8 +448,14 @@ def get_settings(settings_path):
          break
       settings['installs']['kh3'] = install
       print()
+   if (install := settings['installs']['kh3']) is not None:
+      if 'kh3.exe' not in settings['installs']:
+         settings['installs']['kh3.exe'] = os.path.join(install, 'KINGDOM HEARTS III/Binaries/Win64/KINGDOM HEARTS III.exe')
    if 'khmom' not in settings['installs']:
       settings['installs']['khmom'] = None
+   if (install := settings['installs']['khmom']) is not None:
+      if 'khmom.exe' not in settings['installs']:
+         settings['installs']['khmom.exe'] = os.path.join(install, 'KINGDOM HEARTS Melody of Memory.exe')
 
    if 'folder' not in settings:
       print('Now where would you like to store the extra stuff installed by this script?')
@@ -576,19 +471,13 @@ def get_settings(settings_path):
    if 'wineprefix' not in settings:
       settings['wineprefix'] = os.path.join(base_folder, 'wineprefix')
 
+   if 'launch' not in settings:
+      launch = os.path.join(base_folder, 'launch')
+      settings['launch'] = {'kh1': os.path.join(launch, 'kh1.sh'), 'khrecom': os.path.join(launch, 'khrecom.sh'), 'kh2': os.path.join(launch, 'kh2.sh'), 'khbbs': os.path.join(launch, 'khbbs.sh'), 'khddd': os.path.join(launch, 'khddd.sh'), 'kh0.2': os.path.join(launch, 'kh0.2.sh'), 'kh3': os.path.join(launch, 'kh3.sh'), 'khmom': os.path.join(launch, 'khmom.sh')}
+
    if 'saves' not in settings:
       saves = os.path.join(base_folder, 'Save Data')
       settings['saves'] = {'kh1.5+2.5': os.path.join(saves, 'Kingdom Hearts 1.5+2.5'), 'kh2.8': os.path.join(saves, 'Kingdom Hearts 2.8'), 'kh3': os.path.join(saves, 'Kingdom Hearts III'), 'khmom': os.path.join(saves, 'Kingdom Hearts Melody of Memory')}
-
-   if 'lutris' not in settings and os.path.exists('/bin/lutris'):
-      print('Lutris detected. Would you like to add the games to Lutris? (y/n)')
-      settings['lutris'] = yes_no()
-      print()
-
-   if 'heroic' not in settings and os.path.exists('/bin/heroic'):
-      print('Heroic Games Launcher detected. Would you like to add the games to Heroic? (y/n)')
-      settings['heroic'] = yes_no()
-      print()
 
    supports_mods = settings['installs']['kh1.5+2.5'] is not None or settings['installs']['kh2.8'] is not None
    if 'mods' not in settings:
@@ -599,14 +488,13 @@ def get_settings(settings_path):
    if supports_mods:
       if 'refined' not in settings['mods'] and settings['installs']['kh1.5+2.5'] is not None:
          print('Kingdom Hearts ReFined: (y/n)')
-         answer = yes_no()
-         settings['mods']['refined'] = os.path.join(base_folder, 'ReFined') if answer else None
+         settings['mods']['refined'] = os.path.join(base_folder, 'ReFined') if yes_no() else None
          print()
-         if answer:
-            if 'refined_config' not in settings['mods']:
-               settings['mods']['refined_config'] = os.path.join(base_folder, 'reFined.ini')
-            if 'openkh' not in settings['mods']:
-               settings['mods']['openkh'] = os.path.join(base_folder, 'OpenKH')
+      if settings['mods']['refined'] is not None:
+         if 'refined_config' not in settings['mods']:
+            settings['mods']['refined_config'] = os.path.join(base_folder, 'reFined.ini')
+         if 'openkh' not in settings['mods']:
+            settings['mods']['openkh'] = os.path.join(base_folder, 'OpenKH')
       if settings['mods']['refined'] is not None:
          if 'refined.vanilla_ost' not in settings['mods']:
             print('ReFined addon: Vanilla OST toggle (y/n)')
@@ -622,37 +510,36 @@ def get_settings(settings_path):
             print()
       if 'randomizer' not in settings['mods']:
          print('Kingdom Hearts II Randomizer: (y/n)')
-         answer = yes_no()
-         settings['mods']['randomizer'] = os.path.join(base_folder, 'Randomizer') if answer else None
+         settings['mods']['randomizer'] = os.path.join(base_folder, 'Randomizer') if yes_no() else None
          print()
-         if answer:
-            if 'openkh' not in settings['mods']:
-               settings['mods']['openkh'] = os.path.join(base_folder, 'OpenKH')
-            if 'luabackend' not in settings['mods']:
-               settings['mods']['luabackend'] = os.path.join(base_folder, 'LuaBackend')
-            if 'luabackend_config' not in settings['mods']:
-               settings['mods']['luabackend_config'] = os.path.join(base_folder, 'LuaBackend.toml')
+      if settings['mods']['randomizer'] is not None:
+         if 'openkh' not in settings['mods']:
+            settings['mods']['openkh'] = os.path.join(base_folder, 'OpenKH')
+         if 'luabackend' not in settings['mods']:
+            settings['mods']['luabackend'] = os.path.join(base_folder, 'LuaBackend')
+         if 'luabackend_config' not in settings['mods']:
+            settings['mods']['luabackend_config'] = os.path.join(base_folder, 'LuaBackend.toml')
       if 'openkh' not in settings['mods']:
          print('OpenKh mod manager: (y/n)')
          settings['mods']['openkh'] = os.path.join(base_folder, 'OpenKH') if yes_no() else None
          print()
       if settings['mods']['openkh'] is not None and 'panacea' not in settings['mods']:
          print('Panacea mod loader: (y/n)')
-         answer = yes_no()
-         settings['mods']['panacea'] = answer
-         if answer:
-            settings['mods']['panacea_settings'] = os.path.join(base_folder, 'panacea_settings.txt')
+         settings['mods']['panacea'] = yes_no()
          print()
+      if settings['mods'].get('panacea') == True:
+         if 'panacea_settings' not in settings['mods']:
+            settings['mods']['panacea_settings'] = os.path.join(base_folder, 'panacea_settings.txt')
       if 'luabackend' not in settings['mods']:
          print('LuaBackend script loader: (y/n)')
-         answer = yes_no()
-         settings['mods']['luabackend'] = os.path.join(base_folder, 'LuaBackend') if answer else None
-         if answer:
-            settings['mods']['luabackend_config'] = os.path.join(base_folder, 'LuaBackend.toml')
+         settings['mods']['luabackend'] = os.path.join(base_folder, 'LuaBackend') if yes_no() else None
          print()
+      if settings['mods']['luabackend'] is not None:
+         if 'luabackend_config' not in settings['mods']:
+            settings['mods']['luabackend_config'] = os.path.join(base_folder, 'LuaBackend.toml')
 
    with open(settings_path, 'w') as data_file:
-      yaml.dump(settings, data_file, sort_keys=False)
+      yaml.dump(settings, data_file, sort_keys=False, width=1000)
 
    return (settings, settings != old_settings)
 
