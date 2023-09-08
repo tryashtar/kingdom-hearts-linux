@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import requests
 import json
 import zipfile
@@ -11,6 +12,7 @@ import tempfile
 import tarfile
 import stat
 import copy
+import platform
 
 def main():
    settings_path = os.path.join(os.path.dirname(__file__), 'settings.yaml')
@@ -31,38 +33,42 @@ def main():
    kh3_folder = settings['installs']['kh3']
    khmom_folder = settings['installs']['khmom']
    kh2launch = settings['installs'].get('kh2.exe')
-   wineprefix = settings['wineprefix']
-   runner = settings['runner']
+   is_linux = platform.system() == 'Linux'
 
-   print('Checking for runner updates...')
-   new_runner = download_latest(settings, 'runner', 'https://api.github.com/repos/GloriousEggroll/wine-ge-custom/releases/latest', lambda x: x['name'].endswith('.tar.xz'), True, settings['runner'], True)
+   if is_linux:
+      wineprefix = settings['wineprefix']
+      user_folder = os.path.join(wineprefix, 'drive_c/users', os.getlogin())
+      runner = settings['runner']
+      runner_wine = os.path.join(runner, 'bin/wine')
+      if settings['update_runner'] == True:
+         print('Checking for runner updates...')
+         new_runner = download_latest(settings, 'runner', 'https://api.github.com/repos/GloriousEggroll/wine-ge-custom/releases/latest', lambda x: x['name'].endswith('.tar.xz'), True, settings['runner'], True)
+      else:
+         new_runner = False
+      winetricks = []
+      if os.path.exists(os.path.join(wineprefix, 'winetricks.log')):
+         with open(os.path.join(wineprefix, 'winetricks.log'), 'r') as winetricks_file:
+            winetricks = [line.rstrip('\n') for line in winetricks_file]
+      if settings['mods'].get('refined') is not None and 'dotnet48' not in winetricks:
+         print('Installing dotnet to wineprefix (this will take some time)')
+         subprocess.run(['winetricks', '-q', 'dotnet20', 'dotnet48'], env=dict(os.environ, WINEPREFIX=wineprefix, WINE=runner_wine), check=True)
+      if 'vkd3d' not in winetricks:
+         print('Installing VKD3D to wineprefix')
+         subprocess.run(['winetricks', '-q', 'dxvk', 'vkd3d'], env=dict(os.environ, WINEPREFIX=wineprefix, WINE=runner_wine), check=True)
+      if (kh3_folder is not None or kh28_folder is not None) and (new_runner or not os.path.exists(os.path.join(wineprefix, 'drive_c/windows/system32/sqmapi.dll'))):
+         print('Running mf-install to fix KH3/KH2.8')
+         mfinstall_folder = tempfile.mkdtemp()
+         subprocess.run(['git', 'clone', 'https://github.com/84KaliPleXon3/mf-install', mfinstall_folder], check=True)
+         env = os.environ.copy()
+         env['PATH'] = f'{runner}/bin:{env["PATH"]}'
+         env['WINEPREFIX'] = wineprefix
+         subprocess.run(['wineserver', '-w'], check=True)
+         subprocess.run(['wineserver', '-w'], env=env, check=True)
+         subprocess.run(['/bin/sh', os.path.join(mfinstall_folder, 'mf-install.sh')], env=env, check=True)
+         shutil.rmtree(mfinstall_folder)
+   else:
+      user_folder = os.path.expanduser('~')
 
-   user_folder = os.path.join(wineprefix, 'drive_c/users', os.getlogin())
-   if not os.path.exists(user_folder):
-      print('Initializing wineprefix')
-      os.makedirs(wineprefix, exist_ok=True)
-      subprocess.run('wineboot', env=dict(os.environ, WINEPREFIX=wineprefix), check=True)
-   winetricks = []
-   if os.path.exists(os.path.join(wineprefix, 'winetricks.log')):
-      with open(os.path.join(wineprefix, 'winetricks.log'), 'r') as winetricks_file:
-         winetricks = [line.rstrip('\n') for line in winetricks_file]
-   if settings['mods'].get('refined') is not None and 'dotnet48' not in winetricks:
-      print('Installing dotnet to wineprefix (this will take some time)')
-      subprocess.run(['winetricks', '-q', 'dotnet20', 'dotnet48'], env=dict(os.environ, WINEPREFIX=wineprefix), check=True)
-   if 'vkd3d' not in winetricks:
-      print('Installing VKD3D to wineprefix')
-      subprocess.run(['winetricks', '-q', 'dxvk', 'vkd3d'], env=dict(os.environ, WINEPREFIX=wineprefix), check=True)
-   if (kh3_folder is not None or kh28_folder is not None) and (new_runner or not os.path.exists(os.path.join(wineprefix, 'drive_c/windows/system32/sqmapi.dll'))):
-      print('Running mf-install to fix KH3/KH2.8')
-      mfinstall_folder = tempfile.mkdtemp()
-      subprocess.run(['git', 'clone', 'https://github.com/84KaliPleXon3/mf-install', mfinstall_folder], check=True)
-      env = os.environ.copy()
-      env['PATH'] = f'{runner}/bin:{env["PATH"]}'
-      env['WINEPREFIX'] = wineprefix
-      subprocess.run(['wineserver', '-w'], check=True)
-      subprocess.run(['wineserver', '-w'], env=env, check=True)
-      subprocess.run(['/bin/sh', os.path.join(mfinstall_folder, 'mf-install.sh')], env=env, check=True)
-      shutil.rmtree(mfinstall_folder)
    symlinks[os.path.join(user_folder, 'Documents')] = None
    symlinks[os.path.join(user_folder, 'Documents/Kingdom Hearts/Configuration/1638')] = None
    symlinks[os.path.join(user_folder, 'Documents/Kingdom Hearts/Save Data/1638')] = None
@@ -89,7 +95,7 @@ def main():
    backup_vanilla = False
    if kh15_folder is not None:
       epic_folder = os.path.join(kh15_folder, 'EPIC')
-      if os.path.exists(epic_folder) and len(os.listdir(epic_folder)) > 0:
+      if is_linux and os.path.exists(epic_folder) and len(os.listdir(epic_folder)) > 0:
          print('Renaming KH 1.5+2.5 EPIC folder to EPIC.bak to prevent crashes during FMVs')
          os.rename(epic_folder, os.path.join(kh15_folder, 'EPIC.bak'))
       symlinks[os.path.join(kh15_folder, 'x64')] = None
@@ -97,17 +103,23 @@ def main():
       if kh2launch is not None:
          symlinks[kh2launch] = None
       symlinks[os.path.join(kh15_folder, 'reFined.ini')] = None
-      symlinks[os.path.join(kh15_folder, 'version.dll')] = None
+      if is_linux:
+         symlinks[os.path.join(kh15_folder, 'version.dll')] = None
+         symlinks[os.path.join(kh15_folder, 'DINPUT8.dll')] = None
+      else:
+         symlinks[os.path.join(kh15_folder, 'DBGHELP.dll')] = None
+         symlinks[os.path.join(kh15_folder, 'LuaBackend.dll')] = None
       symlinks[os.path.join(kh15_folder, 'panacea_settings.txt')] = None
-      symlinks[os.path.join(kh15_folder, 'DINPUT8.dll')] = None
       symlinks[os.path.join(kh15_folder, 'lua54.dll')] = None
       symlinks[os.path.join(kh15_folder, 'LuaBackend.toml')] = None
    if kh28_folder is not None:
       epic_folder = os.path.join(kh28_folder, 'EPIC')
-      if os.path.exists(epic_folder) and len(os.listdir(epic_folder)) > 0:
+      if is_linux and os.path.exists(epic_folder) and len(os.listdir(epic_folder)) > 0:
          print('Renaming KH 2.8 EPIC folder to EPIC.bak to prevent crashes during FMVs')
          os.rename(epic_folder, os.path.join(kh28_folder, 'EPIC.bak'))
-      symlinks[os.path.join(kh28_folder, 'DINPUT8.dll')] = None
+         symlinks[os.path.join(kh28_folder, 'DINPUT8.dll')] = None
+      else:
+         symlinks[os.path.join(kh28_folder, 'DBGHELP.dll')] = None
       symlinks[os.path.join(kh28_folder, 'lua54.dll')] = None
       symlinks[os.path.join(kh28_folder, 'LuaBackend.toml')] = None
 
@@ -127,10 +139,14 @@ def main():
                print('Creating default panacea configuration')
                with open(pana_settings, 'w') as pana_file:
                   mod_path = os.path.join(openkh_folder, 'mod')
-                  pana_file.write('mod_path="Z:' + mod_path.replace('/', '\\') + '"\nshow_console=False')
+                  windows_path = 'Z:' + mod_path.replace('/', '\\') if is_linux else mod_path
+                  pana_file.write(f'mod_path="{windows_path}"\nshow_console=False')
       if os.path.exists(openkh_folder):
          if settings['mods'].get('panacea') == True and kh15_folder is not None:
-            symlinks[os.path.join(kh15_folder, 'version.dll')] = (os.path.join(openkh_folder, 'OpenKH.Panacea.dll'), False)
+            if is_linux:
+               symlinks[os.path.join(kh15_folder, 'version.dll')] = (os.path.join(openkh_folder, 'OpenKH.Panacea.dll'), False)
+            else:
+               symlinks[os.path.join(kh15_folder, 'DBGHELP.dll')] = (os.path.join(openkh_folder, 'OpenKH.Panacea.dll'), False)
             if pana_settings is not None:
                symlinks[os.path.join(kh15_folder, 'panacea_settings.txt')] = (pana_settings, False)
          symlinks[os.path.join(openkh_folder, 'mods')] = None
@@ -141,7 +157,7 @@ def main():
             changes = False
             with open(mods_manager, 'r') as mods_file:
                mods_data = yaml.safe_load(mods_file)
-            pc_release = 'Z:' + kh15_folder.replace('/','\\')
+            pc_release = 'Z:' + kh15_folder.replace('/','\\') if is_linux else kh15_folder
             if mods_data.get('pcReleaseLocation') != pc_release:
                print('Updating KH 1.5 install location in OpenKH mod manager')
                mods_data['pcReleaseLocation'] = pc_release
@@ -234,12 +250,24 @@ def main():
          os.remove(toml_default)
       if os.path.exists(lua_folder):
          if kh15_folder is not None:
-            symlinks[os.path.join(kh15_folder, 'DINPUT8.dll')] = (os.path.join(lua_folder, 'DBGHELP.dll'), False)
+            if is_linux:
+               symlinks[os.path.join(kh15_folder, 'DINPUT8.dll')] = (os.path.join(lua_folder, 'DBGHELP.dll'), False)
+            else:
+               if openkh_folder is not None:
+                  symlinks[os.path.join(kh15_folder, 'LuaBackend.dll')] = (os.path.join(lua_folder, 'DBGHELP.dll'), False)
+               else:
+                  symlinks[os.path.join(kh15_folder, 'DBGHELP.dll')] = (os.path.join(lua_folder, 'DBGHELP.dll'), False)
             symlinks[os.path.join(kh15_folder, 'lua54.dll')] = (os.path.join(lua_folder, 'lua54.dll'), False)
             if toml_user is not None:
                symlinks[os.path.join(kh15_folder, 'LuaBackend.toml')] = (toml_user, False)
          if kh28_folder is not None:
-            symlinks[os.path.join(kh28_folder, 'DINPUT8.dll')] = (os.path.join(lua_folder, 'DBGHELP.dll'), False)
+            if is_linux:
+               symlinks[os.path.join(kh28_folder, 'DINPUT8.dll')] = (os.path.join(lua_folder, 'DBGHELP.dll'), False)
+            else:
+               if openkh_folder is not None:
+                  symlinks[os.path.join(kh28_folder, 'LuaBackend.dll')] = (os.path.join(lua_folder, 'DBGHELP.dll'), False)
+               else:
+                  symlinks[os.path.join(kh28_folder, 'DBGHELP.dll')] = (os.path.join(lua_folder, 'DBGHELP.dll'), False)
             symlinks[os.path.join(kh28_folder, 'lua54.dll')] = (os.path.join(lua_folder, 'lua54.dll'), False)
             if toml_user is not None:
                symlinks[os.path.join(kh28_folder, 'LuaBackend.toml')] = (toml_user, False)
@@ -250,7 +278,7 @@ def main():
          for game in ['kh1', 'kh2', 'bbs', 'recom', 'kh3d']:
             if game in toml_data and 'scripts' in toml_data[game]:
                path = os.path.join(openkh_folder, 'mod', game, 'scripts') 
-               windows_path = 'Z:' + path.replace('/', '\\')
+               windows_path = 'Z:' + path.replace('/', '\\') if is_linux else path
                found = False
                for script in toml_data[game]['scripts']:
                   if script['path'] == windows_path:
@@ -293,28 +321,28 @@ def main():
       if exe is None:
          return
       os.makedirs(os.path.dirname(path), exist_ok=True)
+      vars = [f'WINEPREFIX="{wineprefix}"','WINEFSYNC=1','WINE_FULLSCREEN_FSR=1']
       dlls = []
       if has_panacea and settings['mods'].get('panacea') == True:
          dlls.append('version=n,b')
       if has_luabackend and settings['mods'].get('luabackend') is not None:
          dlls.append('dinput8=n,b')
-      if len(dlls) == 0:
-         overrides = ''
-      else:
-         overrides = f'WINEDLLOVERRIDES="{";".join(dlls)}" '
+      if len(dlls) > 0:
+         vars.append(f'WINEDLLOVERRIDES="{";".join(dlls)}"')
       with open(path, 'w') as sh_file:
-         sh_file.write(f'#!/bin/sh\ncd "{folder}" || exit 1\nWINEPREFIX="{wineprefix}" {overrides}"{runner}/bin/wine" "{exe}"\n')
+         sh_file.write(f'#!/bin/sh\ncd "{folder}" || exit 1\n{" ".join(vars)} "{runner_wine}" "{exe}"\n')
       st = os.stat(path)
       os.chmod(path, st.st_mode | stat.S_IEXEC)
 
-   make_launch('kh1', settings['installs']['kh1.5+2.5'], True, True)
-   make_launch('kh2', settings['installs']['kh1.5+2.5'], True, True)
-   make_launch('khrecom', settings['installs']['kh1.5+2.5'], True, True)
-   make_launch('khbbs', settings['installs']['kh1.5+2.5'], True, True)
-   make_launch('khddd', settings['installs']['kh2.8'], False, True)
-   make_launch('kh0.2', settings['installs']['kh2.8'], False, False)
-   make_launch('kh3', settings['installs']['kh3'], False, False)
-   make_launch('khmom', settings['installs']['khmom'], False, False)
+   if is_linux:
+      make_launch('kh1', settings['installs']['kh1.5+2.5'], True, True)
+      make_launch('kh2', settings['installs']['kh1.5+2.5'], True, True)
+      make_launch('khrecom', settings['installs']['kh1.5+2.5'], True, True)
+      make_launch('khbbs', settings['installs']['kh1.5+2.5'], True, True)
+      make_launch('khddd', settings['installs']['kh2.8'], False, True)
+      make_launch('kh0.2', settings['installs']['kh2.8'], False, False)
+      make_launch('kh3', settings['installs']['kh3'], False, False)
+      make_launch('khmom', settings['installs']['khmom'], False, False)
 
    with open(settings_path, 'w') as data_file:
       yaml.dump(settings, data_file, sort_keys=False, width=1000)
@@ -322,8 +350,6 @@ def main():
 
 def download_latest(settings, date_key, url, filter, has_extra_folder, destination_folder, is_tar):
    date = settings['downloads'].get(date_key)
-   if date is not None:
-      date = datetime.datetime.fromisoformat(date)
    rq = requests.get(url)
    if rq.status_code != 200:
       print(f'Error {rq.status_code}!')
@@ -372,7 +398,7 @@ def download_latest(settings, date_key, url, filter, has_extra_folder, destinati
             else:
                zip.extractall(destination_folder)
          shutil.rmtree(temp_folder)
-         settings['downloads'][date_key] = asset_date.isoformat()
+         settings['downloads'][date_key] = asset_date
          return True
    return False
 
@@ -465,15 +491,21 @@ def get_settings(settings_path):
    
    base_folder = settings['folder']
 
-   if 'runner' not in settings:
-      settings['runner'] = os.path.join(base_folder, 'runner')
+   if platform.system() == 'Linux':
+      if 'runner' not in settings:
+         print('Linux detected: the games will be run with an automatically-configured build of Wine.')
+         print()
+         settings['runner'] = os.path.join(base_folder, 'runner')
+      
+      if 'update_runner' not in settings:
+         settings['update_runner'] = True
 
-   if 'wineprefix' not in settings:
-      settings['wineprefix'] = os.path.join(base_folder, 'wineprefix')
+      if 'wineprefix' not in settings:
+         settings['wineprefix'] = os.path.join(base_folder, 'wineprefix')
 
-   if 'launch' not in settings:
-      launch = os.path.join(base_folder, 'launch')
-      settings['launch'] = {'kh1': os.path.join(launch, 'kh1.sh'), 'khrecom': os.path.join(launch, 'khrecom.sh'), 'kh2': os.path.join(launch, 'kh2.sh'), 'khbbs': os.path.join(launch, 'khbbs.sh'), 'khddd': os.path.join(launch, 'khddd.sh'), 'kh0.2': os.path.join(launch, 'kh0.2.sh'), 'kh3': os.path.join(launch, 'kh3.sh'), 'khmom': os.path.join(launch, 'khmom.sh')}
+      if 'launch' not in settings:
+         launch = os.path.join(base_folder, 'launch')
+         settings['launch'] = {'kh1': os.path.join(launch, 'kh1.sh'), 'khrecom': os.path.join(launch, 'khrecom.sh'), 'kh2': os.path.join(launch, 'kh2.sh'), 'khbbs': os.path.join(launch, 'khbbs.sh'), 'khddd': os.path.join(launch, 'khddd.sh'), 'kh0.2': os.path.join(launch, 'kh0.2.sh'), 'kh3': os.path.join(launch, 'kh3.sh'), 'khmom': os.path.join(launch, 'khmom.sh')}
 
    if 'saves' not in settings:
       saves = os.path.join(base_folder, 'Save Data')
