@@ -26,17 +26,34 @@ def main():
    if 'downloads' not in settings:
       settings['downloads'] = {}
    print('Starting!')
-   symlinks = {}
+
+   remove_symlinks = set()
+   def make_symlink(new, existing, is_dir):
+      if new in remove_symlinks:
+         remove_symlinks.remove(new)
+      if os.path.islink(new):
+         target = os.readlink(new)
+         if target == existing:
+            return
+         print(f'Removing previous symlink in \'{new}\' pointing to \'{target}\'')
+         os.remove(new)
+      if not os.path.exists(new):
+         print(f'Creating symlink in \'{new}\' pointing to \'{existing}\'')
+         os.makedirs(os.path.dirname(new), exist_ok=True)
+         os.symlink(existing, new, target_is_directory=is_dir)
 
    kh15_folder = settings['installs']['kh1.5+2.5']
    kh28_folder = settings['installs']['kh2.8']
    kh3_folder = settings['installs']['kh3']
    khmom_folder = settings['installs']['khmom']
    kh2launch = settings['installs'].get('kh2.exe')
+   openkh_folder = settings['mods'].get('openkh')
    is_linux = platform.system() == 'Linux'
-
+   
    if is_linux:
       wineprefix = settings['wineprefix']
+      def convert_path(path):
+         return subprocess.run(['winepath', '-w', path], check=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=dict(os.environ, WINEPREFIX=wineprefix)).stdout.decode('utf-8').rstrip('\n')
       user_folder = os.path.join(wineprefix, 'drive_c/users', os.getlogin())
       runner = settings['runner']
       runner_wine = os.path.join(runner, 'bin/wine')
@@ -51,14 +68,21 @@ def main():
             winetricks = [line.rstrip('\n') for line in winetricks_file]
       if settings['mods'].get('refined') is not None and 'dotnet48' not in winetricks:
          print('Installing dotnet to wineprefix (this will take some time)')
-         subprocess.run(['winetricks', '-q', 'dotnet20', 'dotnet48'], env=dict(os.environ, WINEPREFIX=wineprefix, WINE=runner_wine), check=True)
+         subprocess.run(['winetricks', '-q', 'dotnet20', 'dotnet48'], env=dict(os.environ, WINEPREFIX=wineprefix), check=True)
+      if openkh_folder is not None and 'dotnet6' not in winetricks:
+         print('Installing dotnet6 to wineprefix')
+         subprocess.run(['winetricks', '-q', 'dotnet6'], env=dict(os.environ, WINEPREFIX=wineprefix), check=True)
+         subprocess.run(['wine', 'reg', 'add', 'HKEY_CURRENT_USER\\Environment', '/f', '/v', 'DOTNET_ROOT', '/t', 'REG_SZ', '/d', 'C:\\Program Files\\dotnet'], env=dict(os.environ, WINEPREFIX=wineprefix), check=True)
       if 'vkd3d' not in winetricks:
          print('Installing VKD3D to wineprefix')
-         subprocess.run(['winetricks', '-q', 'dxvk', 'vkd3d'], env=dict(os.environ, WINEPREFIX=wineprefix, WINE=runner_wine), check=True)
+         subprocess.run(['winetricks', '-q', 'dxvk', 'vkd3d'], env=dict(os.environ, WINEPREFIX=wineprefix), check=True)
       if (kh3_folder is not None or kh28_folder is not None) and (new_runner or not os.path.exists(os.path.join(wineprefix, 'drive_c/windows/system32/sqmapi.dll'))):
          print('Running mf-install to fix KH3/KH2.8')
          mfinstall_folder = tempfile.mkdtemp()
          subprocess.run(['git', 'clone', 'https://github.com/84KaliPleXon3/mf-install', mfinstall_folder], check=True)
+         sha = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=mfinstall_folder, check=True, stdout=subprocess.PIPE)
+         if sha.stdout != b'19669ca372ddd3993e10dc287132edb172188e3e\n':
+            raise ValueError('mf-install possibly tampered with!')
          env = os.environ.copy()
          env['PATH'] = f'{runner}/bin:{env["PATH"]}'
          env['WINEPREFIX'] = wineprefix
@@ -68,29 +92,31 @@ def main():
          shutil.rmtree(mfinstall_folder)
    else:
       user_folder = os.path.expanduser('~')
+      def convert_path(path):
+         return path
 
-   symlinks[os.path.join(user_folder, 'Documents')] = None
-   symlinks[os.path.join(user_folder, 'Documents/Kingdom Hearts/Configuration/1638')] = None
-   symlinks[os.path.join(user_folder, 'Documents/Kingdom Hearts/Save Data/1638')] = None
-   symlinks[os.path.join(user_folder, 'Documents/KINGDOM HEARTS HD 1.5+2.5 ReMIX/Epic Games Store/1638')] = None
-   symlinks[os.path.join(user_folder, 'Documents/KINGDOM HEARTS HD 2.8 Final Chapter Prologue/Epic Games Store/1638')] = None
-   symlinks[os.path.join(user_folder, 'Documents/KINGDOM HEARTS III/Epic Games Store/1638')] = None
-   symlinks[os.path.join(user_folder, 'Documents/KINGDOM HEARTS Melody of Memory/Epic Games Store')] = None
+   remove_symlinks.add(os.path.join(user_folder, 'Documents'))
+   remove_symlinks.add(os.path.join(user_folder, 'Documents/Kingdom Hearts/Configuration/1638'))
+   remove_symlinks.add(os.path.join(user_folder, 'Documents/Kingdom Hearts/Save Data/1638'))
+   remove_symlinks.add(os.path.join(user_folder, 'Documents/KINGDOM HEARTS HD 1.5+2.5 ReMIX/Epic Games Store/1638'))
+   remove_symlinks.add(os.path.join(user_folder, 'Documents/KINGDOM HEARTS HD 2.8 Final Chapter Prologue/Epic Games Store/1638'))
+   remove_symlinks.add(os.path.join(user_folder, 'Documents/KINGDOM HEARTS III/Epic Games Store/1638'))
+   remove_symlinks.add(os.path.join(user_folder, 'Documents/KINGDOM HEARTS Melody of Memory/Epic Games Store'))
    if (save := settings['saves']['kh1.5+2.5']) is not None and kh15_folder is not None:
       os.makedirs(save, exist_ok=True)
-      symlinks[os.path.join(user_folder, 'Documents/KINGDOM HEARTS HD 1.5+2.5 ReMIX/Epic Games Store/1638')] = (save, True)
+      make_symlink(os.path.join(user_folder, 'Documents/KINGDOM HEARTS HD 1.5+2.5 ReMIX/Epic Games Store/1638'), save, True)
       if settings['mods'].get('refined') is not None:
-         symlinks[os.path.join(user_folder, 'Documents/Kingdom Hearts/Configuration/1638')] = (save, True)
-         symlinks[os.path.join(user_folder, 'Documents/Kingdom Hearts/Save Data/1638')] = (save, True)
+         make_symlink(os.path.join(user_folder, 'Documents/Kingdom Hearts/Configuration/1638'), save, True)
+         make_symlink(os.path.join(user_folder, 'Documents/Kingdom Hearts/Save Data/1638'), save, True)
    if (save := settings['saves']['kh2.8']) is not None and kh28_folder is not None:
       os.makedirs(save, exist_ok=True)
-      symlinks[os.path.join(user_folder, 'Documents/KINGDOM HEARTS HD 2.8 Final Chapter Prologue/Epic Games Store/1638')] = (save, True)
+      make_symlink(os.path.join(user_folder, 'Documents/KINGDOM HEARTS HD 2.8 Final Chapter Prologue/Epic Games Store/1638'), save, True)
    if (save := settings['saves']['kh3']) is not None and kh3_folder is not None:
       os.makedirs(save, exist_ok=True)
-      symlinks[os.path.join(user_folder, 'Documents/KINGDOM HEARTS III/Epic Games Store/1638')] = (save, True)
+      make_symlink(os.path.join(user_folder, 'Documents/KINGDOM HEARTS III/Epic Games Store/1638'), save, True)
    if (save := settings['saves']['khmom']) is not None and khmom_folder is not None:
       os.makedirs(save, exist_ok=True)
-      symlinks[os.path.join(user_folder, 'Documents/KINGDOM HEARTS Melody of Memory/Epic Games Store')] = (save, True)
+      make_symlink(os.path.join(user_folder, 'Documents/KINGDOM HEARTS Melody of Memory/Epic Games Store'), save, True)
    
    backup_vanilla = False
    if kh15_folder is not None:
@@ -98,145 +124,215 @@ def main():
       if is_linux and os.path.exists(epic_folder) and len(os.listdir(epic_folder)) > 0:
          print('Renaming KH 1.5+2.5 EPIC folder to EPIC.bak to prevent crashes during FMVs')
          os.rename(epic_folder, os.path.join(kh15_folder, 'EPIC.bak'))
-      symlinks[os.path.join(kh15_folder, 'x64')] = None
-      symlinks[os.path.join(kh15_folder, 'Keystone.Net.dll')] = None
+      remove_symlinks.add(os.path.join(kh15_folder, 'x64'))
+      remove_symlinks.add(os.path.join(kh15_folder, 'Keystone.Net.dll'))
       if kh2launch is not None:
-         symlinks[kh2launch] = None
-      symlinks[os.path.join(kh15_folder, 'reFined.ini')] = None
+         remove_symlinks.add(kh2launch)
+      remove_symlinks.add(os.path.join(kh15_folder, 'reFined.ini'))
       if is_linux:
-         symlinks[os.path.join(kh15_folder, 'version.dll')] = None
-         symlinks[os.path.join(kh15_folder, 'DINPUT8.dll')] = None
+         remove_symlinks.add(os.path.join(kh15_folder, 'version.dll'))
+         remove_symlinks.add(os.path.join(kh15_folder, 'DINPUT8.dll'))
       else:
-         symlinks[os.path.join(kh15_folder, 'DBGHELP.dll')] = None
-         symlinks[os.path.join(kh15_folder, 'LuaBackend.dll')] = None
-      symlinks[os.path.join(kh15_folder, 'panacea_settings.txt')] = None
-      symlinks[os.path.join(kh15_folder, 'lua54.dll')] = None
-      symlinks[os.path.join(kh15_folder, 'LuaBackend.toml')] = None
+         remove_symlinks.add(os.path.join(kh15_folder, 'DBGHELP.dll'))
+         remove_symlinks.add(os.path.join(kh15_folder, 'LuaBackend.dll'))
+      remove_symlinks.add(os.path.join(kh15_folder, 'panacea_settings.txt'))
+      remove_symlinks.add(os.path.join(kh15_folder, 'lua54.dll'))
+      remove_symlinks.add(os.path.join(kh15_folder, 'LuaBackend.toml'))
    if kh28_folder is not None:
       epic_folder = os.path.join(kh28_folder, 'EPIC')
       if is_linux and os.path.exists(epic_folder) and len(os.listdir(epic_folder)) > 0:
          print('Renaming KH 2.8 EPIC folder to EPIC.bak to prevent crashes during FMVs')
          os.rename(epic_folder, os.path.join(kh28_folder, 'EPIC.bak'))
-         symlinks[os.path.join(kh28_folder, 'DINPUT8.dll')] = None
+         remove_symlinks.add(os.path.join(kh28_folder, 'DINPUT8.dll'))
       else:
-         symlinks[os.path.join(kh28_folder, 'DBGHELP.dll')] = None
-      symlinks[os.path.join(kh28_folder, 'lua54.dll')] = None
-      symlinks[os.path.join(kh28_folder, 'LuaBackend.toml')] = None
+         remove_symlinks.add(os.path.join(kh28_folder, 'DBGHELP.dll'))
+      remove_symlinks.add(os.path.join(kh28_folder, 'lua54.dll'))
+      remove_symlinks.add(os.path.join(kh28_folder, 'LuaBackend.toml'))
 
-   openkh_folder = settings['mods'].get('openkh')
-   mods_folder = settings['mods'].get('folder')
    if openkh_folder is not None:
+      default_mods_folder = os.path.join(openkh_folder, 'mods')
+      custom_mods_folder = settings['mods'].get('folder')
+      write_mods_folder = custom_mods_folder if custom_mods_folder is not None else default_mods_folder
       mods_manager = os.path.join(openkh_folder, 'mods-manager.yml')
       pana_settings = settings['mods'].get('panacea_settings')
+      pana_write = pana_settings
+      if pana_settings is None:
+         pana_write = os.path.join(kh15_folder, 'panacea_settings.txt')
       print('Checking for OpenKH updates...')
       downloaded = download_latest(settings, 'openkh', 'https://api.github.com/repos/OpenKH/OpenKh/releases/tags/latest', lambda x: x['name'] == 'openkh.zip', True, openkh_folder, False)
       if downloaded and not os.path.exists(mods_manager):
          print('Creating default OpenKH mod manager configuration')
          with open(mods_manager, 'w') as mods_file:
             yaml.dump({"gameEdition":2}, mods_file)
+         if pana_write is not None and not os.path.exists(pana_write):
+            print('Creating default panacea configuration')
+            with open(pana_write, 'w') as pana_file:
+               pana_file.write('show_console=False')
+      if settings['mods'].get('panacea') == True:
+         if is_linux:
+            make_symlink(os.path.join(kh15_folder, 'version.dll'), os.path.join(openkh_folder, 'OpenKH.Panacea.dll'), False)
+         else:
+            make_symlink(os.path.join(kh15_folder, 'DBGHELP.dll'), os.path.join(openkh_folder, 'OpenKH.Panacea.dll'), False)
          if pana_settings is not None:
-            if not os.path.exists(pana_settings):
-               print('Creating default panacea configuration')
-               with open(pana_settings, 'w') as pana_file:
-                  mod_path = os.path.join(openkh_folder, 'mod')
-                  windows_path = 'Z:' + mod_path.replace('/', '\\') if is_linux else mod_path
-                  pana_file.write(f'mod_path="{windows_path}"\nshow_console=False')
-      if os.path.exists(openkh_folder):
-         if settings['mods'].get('panacea') == True and kh15_folder is not None:
-            if is_linux:
-               symlinks[os.path.join(kh15_folder, 'version.dll')] = (os.path.join(openkh_folder, 'OpenKH.Panacea.dll'), False)
-            else:
-               symlinks[os.path.join(kh15_folder, 'DBGHELP.dll')] = (os.path.join(openkh_folder, 'OpenKH.Panacea.dll'), False)
-            if pana_settings is not None:
-               symlinks[os.path.join(kh15_folder, 'panacea_settings.txt')] = (pana_settings, False)
-         symlinks[os.path.join(openkh_folder, 'mods')] = None
-         if mods_folder is not None:
-            os.makedirs(mods_folder, exist_ok=True)
-            symlinks[os.path.join(openkh_folder, 'mods')] = (mods_folder, True)
-         if os.path.exists(mods_manager):
-            changes = False
-            with open(mods_manager, 'r') as mods_file:
-               mods_data = yaml.safe_load(mods_file)
-            pc_release = 'Z:' + kh15_folder.replace('/','\\') if is_linux else kh15_folder
-            if mods_data.get('pcReleaseLocation') != pc_release:
-               print('Updating KH 1.5 install location in OpenKH mod manager')
-               mods_data['pcReleaseLocation'] = pc_release
-               changes = True
-            panacea = settings['mods'].get('panacea') == True
-            if mods_data.get('panaceaInstalled') != panacea:
-               print('Updating panacea install status in OpenKH mod manager')
-               mods_data['panaceaInstalled'] = panacea
-               changes = True
-            if changes:
-               with open(mods_manager, 'w') as mods_file:
-                  yaml.dump(mods_data, mods_file, sort_keys=False)
+            make_symlink(os.path.join(kh15_folder, 'panacea_settings.txt'), pana_settings, False)
+      built_mods_folder = os.path.join(openkh_folder, 'mod')
+      if os.path.exists(pana_write):
+         windows_folder = convert_path(built_mods_folder)
+         changes = False
+         found = False
+         with open(pana_write, 'r') as pana_file:
+            lines = [line.rstrip('\n') for line in pana_file]
+         for i in range(len(lines)):
+            line = lines[i]
+            key,value = line.split('=', 1)
+            if key == 'mod_path':
+               found = True
+               if value != windows_folder:
+                  value = windows_folder
+                  changes = True
+                  lines[i] = f'{key}={value}'
+         if not found:
+            lines.append(f'mod_path={windows_folder}')
+            changes = True
+         if changes:
+            print(f'Updating Panacea mods location')
+            with open(pana_write, 'w') as pana_file:
+               for line in lines:
+                  pana_file.write(line + '\n')
 
-      def download_mod(repo):
+      remove_symlinks.add(default_mods_folder)
+      remove_symlinks.add(os.path.join(openkh_folder, 'mods-KH1.txt'))
+      remove_symlinks.add(os.path.join(openkh_folder, 'mods-KH2.txt'))
+      remove_symlinks.add(os.path.join(openkh_folder, 'mods-BBS.txt'))
+      remove_symlinks.add(os.path.join(openkh_folder, 'mods-ReCoM.txt'))
+      if custom_mods_folder is not None:
+         os.makedirs(custom_mods_folder, exist_ok=True)
+         make_symlink(default_mods_folder, custom_mods_folder, True)
+         make_symlink(os.path.join(openkh_folder, 'mods-KH1.txt'), os.path.join(custom_mods_folder, 'kh1.txt'), False)
+         make_symlink(os.path.join(openkh_folder, 'mods-KH2.txt'), os.path.join(custom_mods_folder, 'kh2.txt'), False)
+         make_symlink(os.path.join(openkh_folder, 'mods-BBS.txt'), os.path.join(custom_mods_folder, 'bbs.txt'), False)
+         make_symlink(os.path.join(openkh_folder, 'mods-ReCoM.txt'), os.path.join(custom_mods_folder, 'Recom.txt'), False)
+      if os.path.exists(mods_manager):
+         changes = False
+         with open(mods_manager, 'r') as mods_file:
+            mods_data = yaml.safe_load(mods_file)
+         pc_release = convert_path(kh15_folder)
+         if mods_data.get('pcReleaseLocation') != pc_release:
+            print('Updating KH 1.5 install location in OpenKH mod manager')
+            mods_data['pcReleaseLocation'] = pc_release
+            changes = True
+         panacea = settings['mods'].get('panacea') == True
+         if mods_data.get('panaceaInstalled') != panacea:
+            print('Updating panacea install status in OpenKH mod manager')
+            mods_data['panaceaInstalled'] = panacea
+            changes = True
+         if changes:
+            with open(mods_manager, 'w') as mods_file:
+               yaml.dump(mods_data, mods_file, sort_keys=False)
+
+      def download_mod(game, repo):
          if openkh_folder is None:
             return
-         if mods_folder is not None:
-            patch_folder = os.path.join(mods_folder, f'kh2/{repo}')
-         else:
-            patch_folder = os.path.join(openkh_folder, f'mods/kh2/{repo}')
+         patch_folder = os.path.join(write_mods_folder, game, repo)
+         if game not in mod_changes:
+            mod_changes[game] = {}
          if not os.path.exists(patch_folder):
             print(f'Downloading mod {repo}')
             subprocess.run(['git', 'clone', f'https://github.com/{repo}', '--recurse-submodules', patch_folder], check=True)
-         mod_changes[repo] = True
+            del mod_changes[game][repo]
+         else:
+            mod_changes[game][repo] = True
 
-      mod_changes = {'KH2FM-Mods-Num/GoA-ROM-Edition': False, 'KH-ReFined/KH2-VanillaOST': False, 'KH-ReFined/KH2-VanillaEnemy': False, 'KH-ReFined/KH2-MultiAudio': False, 'KH-ReFined/KH2-MAIN': False}
+      mod_changes = {'kh2':{'KH2FM-Mods-Num/GoA-ROM-Edition': False, 'KH-ReFined/KH2-VanillaOST': False, 'KH-ReFined/KH2-VanillaEnemy': False, 'KH-ReFined/KH2-MultiAudio': False, 'KH-ReFined/KH2-MAIN': False}}
       if (refined_folder := settings['mods'].get('refined')) is not None:
          print('Checking for ReFined updates...')
          download_latest(settings, 'refined', 'https://api.github.com/repos/TopazTK/KH-ReFined/releases', lambda x: x['name'].endswith('.zip'), False, refined_folder, False)
-         download_mod('KH-ReFined/KH2-MAIN')
+         download_mod('kh2', 'KH-ReFined/KH2-MAIN')
          if settings['mods'].get('refined.vanilla_ost') == True:
-            download_mod('KH-ReFined/KH2-VanillaOST')
+            download_mod('kh2', 'KH-ReFined/KH2-VanillaOST')
          if settings['mods'].get('refined.vanilla_enemies') == True:
-            download_mod('KH-ReFined/KH2-VanillaEnemy')
+            download_mod('kh2', 'KH-ReFined/KH2-VanillaEnemy')
          if settings['mods'].get('refined.multi_audio') == True:
-            download_mod('KH-ReFined/KH2-MultiAudio')
-         if os.path.exists(refined_folder) and kh15_folder is not None:
-            symlinks[os.path.join(kh15_folder, 'x64')] = (os.path.join(refined_folder, 'x64'), True)
-            symlinks[os.path.join(kh15_folder, 'Keystone.Net.dll')] = (os.path.join(refined_folder, 'Keystone.Net.dll'), False)
+            download_mod('kh2', 'KH-ReFined/KH2-MultiAudio')
+         if os.path.exists(refined_folder):
+            make_symlink(os.path.join(kh15_folder, 'x64'), os.path.join(refined_folder, 'x64'), True)
+            make_symlink(os.path.join(kh15_folder, 'Keystone.Net.dll'), os.path.join(refined_folder, 'Keystone.Net.dll'), False)
             if kh2launch is not None:
-               symlinks[kh2launch] = (os.path.join(refined_folder, 'KINGDOM HEARTS II FINAL MIX.exe'), False)
+               make_symlink(kh2launch, os.path.join(refined_folder, 'KINGDOM HEARTS II FINAL MIX.exe'), False)
             if (refined_ini := settings['mods'].get('refined_config')) is not None:
-               symlinks[os.path.join(kh15_folder, 'reFined.ini')] = (refined_ini, False)
+               make_symlink(os.path.join(kh15_folder, 'reFined.ini'), refined_ini, False)
             backup_vanilla = True
 
       if (randomizer_folder := settings['mods'].get('randomizer')) is not None:
          print('Checking for Randomizer updates...')
          download_latest(settings, 'randomizer', 'https://api.github.com/repos/tommadness/KH2Randomizer/releases/latest', lambda x: x['name'] == 'Kingdom.Hearts.II.Final.Mix.Randomizer.zip', False, randomizer_folder, False)
-         download_mod('KH2FM-Mods-Num/GoA-ROM-Edition')
+         download_mod('kh2', 'KH2FM-Mods-Num/GoA-ROM-Edition')
 
-      if os.path.exists(openkh_folder):
-         mod_dir = os.path.join(openkh_folder, 'mods')
-         if os.path.exists(mod_dir):
-            for game in os.listdir(mod_dir):
-               for parent in os.listdir(os.path.join(mod_dir, game)):
-                  for repo in os.listdir(os.path.join(mod_dir, game, parent)):
-                     if os.path.exists(os.path.join(mod_dir, game, parent, repo, '.git')):
-                        print(f'Checking for updates for mod {parent}/{repo}')
-                        subprocess.run(['git', 'pull', '--recurse-submodules'], cwd=os.path.join(mod_dir, game, parent, repo), check=True)
-         enabled_mods = []
-         enabled_mods_path = os.path.join(openkh_folder, 'mods-KH2.txt')
+      if os.path.exists(write_mods_folder):
+         for dir in [os.path.join(dp, f) for dp, dn, _ in os.walk(write_mods_folder) for f in dn]:
+            if os.path.exists(os.path.join(dir, '.git')):
+               print(f'Checking for updates for mod {os.path.basename(dir)}')
+               subprocess.run(['git', 'pull', '--recurse-submodules'], cwd=dir, check=True)
+      if 'last_build' not in settings:
+         settings['last_build'] = {}
+      for gameid, txtid in [('kh1', 'KH1'), ('kh2', 'KH2'), ('bbs', 'BBS'), ('Recom', 'ReCoM')]:
+         enabled_mods_path = os.path.join(openkh_folder, f'mods-{txtid}.txt')
          if os.path.exists(enabled_mods_path):
             with open(enabled_mods_path, 'r') as enabled_file:
                enabled_mods = [line.rstrip('\n') for line in enabled_file]
-         changes = False
-         for mod,enabled in mod_changes.items():
-            if enabled and mod not in enabled_mods:
-               print(f'Enabling mod {mod}')
-               enabled_mods.append(mod)
-               changes = True
-            elif not enabled and mod in enabled_mods:
-               print(f'Disabling mod {mod}')
-               enabled_mods.remove(mod)
-               changes = True
-         if changes:
-            print('You still need to manually build/patch these changes in the OpenKH Mod Manager!')
+         else:
+            enabled_mods = []
+         if gameid in mod_changes:
+            for mod,enabled in mod_changes[gameid].items():
+               if enabled and mod not in enabled_mods:
+                  print(f'Enabling {gameid} mod {mod}')
+                  enabled_mods.append(mod)
+               elif not enabled and mod in enabled_mods:
+                  print(f'Disabling {gameid} mod {mod}')
+                  enabled_mods.remove(mod)
+         last_build = settings['last_build'].get(gameid, [])
+         if enabled_mods != last_build:
             with open(enabled_mods_path, 'w') as enabled_file:
                for line in enabled_mods:
                   enabled_file.write(line + '\n')
+            data_folder = os.path.join(openkh_folder, 'data', gameid)
+            source_folder = os.path.join(kh15_folder, 'Image/en')
+            if not os.path.exists(data_folder):
+               print(f'Extracting {gameid} data (this will take some time)')
+               for file in os.listdir(source_folder):
+                  if file.startswith(f'{gameid}_') and os.path.splitext(file)[1] == '.hed':
+                     if is_linux:
+                        subprocess.run(['wine', os.path.join(openkh_folder, 'OpenKh.Command.IdxImg.exe'), 'hed', 'extract', '-n', '-o', convert_path(data_folder), convert_path(os.path.join(source_folder, file))], check=True, env=dict(os.environ, WINEPREFIX=wineprefix))
+                     else:
+                        subprocess.run([os.path.join(openkh_folder, 'OpenKh.Command.IdxImg.exe'), 'hed', 'extract', '-n', '-o', data_folder, os.path.join(source_folder, file)], check=True)
+               for file in os.listdir(os.path.join(data_folder, 'original')):
+                  shutil.move(os.path.join(data_folder, 'original', file), data_folder)
+            print(f'Building {gameid} mods')
+            if is_linux:
+               subprocess.run(['wine', os.path.join(openkh_folder, 'OpenKh.Command.Patcher.exe'), 'build', '-g', gameid, '-o', convert_path(os.path.join(built_mods_folder, gameid)), '-e', convert_path(enabled_mods_path), '-f', convert_path(write_mods_folder), '-d', convert_path(data_folder)], check=True, env=dict(os.environ, WINEPREFIX=wineprefix))
+            else:
+               subprocess.run([os.path.join(openkh_folder, 'OpenKh.Command.Patcher.exe'), 'build', '-g', gameid, '-o',os.path.join(built_mods_folder, gameid), '-e', enabled_mods_path, '-f', write_mods_folder, '-d', data_folder], check=True)
+            if settings['mods'].get('panacea') != True:
+               print(f'Patching {gameid} mods')
+               patch_folder = os.path.join(openkh_folder, 'patched')
+               backup_folder = os.path.join(kh15_folder, 'BackupImage')
+               if os.path.exists(backup_folder):
+                  for file in os.listdir(backup_folder):
+                     shutil.copyfile(os.path.join(backup_folder, file), os.path.join(source_folder, file))
+                  shutil.rmtree(backup_folder)
+               if is_linux:
+                  subprocess.run(['wine', os.path.join(openkh_folder, 'OpenKh.Command.Patcher.exe'), 'patch', '-b', convert_path(os.path.join(built_mods_folder, gameid)), '-o', convert_path(patch_folder), '-f', convert_path(source_folder)], check=True, env=dict(os.environ, WINEPREFIX=wineprefix))
+               else:
+                  subprocess.run([os.path.join(openkh_folder, 'OpenKh.Command.Patcher.exe'), 'patch', '-b', os.path.join(built_mods_folder, gameid), '-o', patch_folder, '-f', source_folder], check=True)
+               os.makedirs(backup_folder, exist_ok=True)
+               for file in os.listdir(patch_folder):
+                  backup_path = os.path.join(backup_folder, file)
+                  write_path = os.path.join(source_folder, file)
+                  if not os.path.exists(backup_path):
+                     shutil.copyfile(write_path, backup_path)
+                  shutil.copyfile(os.path.join(patch_folder, file), write_path)
+               shutil.rmtree(patch_folder)
+            settings['last_build'][gameid] = enabled_mods
 
    if (lua_folder := settings['mods'].get('luabackend')) is not None:
       print('Checking for LuaBackend updates...')
@@ -248,29 +344,28 @@ def main():
             print('Creating default LuaBackend.toml configuration')
             shutil.copyfile(toml_default, toml_user)
          os.remove(toml_default)
-      if os.path.exists(lua_folder):
-         if kh15_folder is not None:
-            if is_linux:
-               symlinks[os.path.join(kh15_folder, 'DINPUT8.dll')] = (os.path.join(lua_folder, 'DBGHELP.dll'), False)
+      if kh15_folder is not None:
+         if is_linux:
+            make_symlink(os.path.join(kh15_folder, 'DINPUT8.dll'), os.path.join(lua_folder, 'DBGHELP.dll'), False)
+         else:
+            if openkh_folder is not None:
+               make_symlink(os.path.join(kh15_folder, 'LuaBackend.dll'), os.path.join(lua_folder, 'DBGHELP.dll'), False)
             else:
-               if openkh_folder is not None:
-                  symlinks[os.path.join(kh15_folder, 'LuaBackend.dll')] = (os.path.join(lua_folder, 'DBGHELP.dll'), False)
-               else:
-                  symlinks[os.path.join(kh15_folder, 'DBGHELP.dll')] = (os.path.join(lua_folder, 'DBGHELP.dll'), False)
-            symlinks[os.path.join(kh15_folder, 'lua54.dll')] = (os.path.join(lua_folder, 'lua54.dll'), False)
-            if toml_user is not None:
-               symlinks[os.path.join(kh15_folder, 'LuaBackend.toml')] = (toml_user, False)
-         if kh28_folder is not None:
-            if is_linux:
-               symlinks[os.path.join(kh28_folder, 'DINPUT8.dll')] = (os.path.join(lua_folder, 'DBGHELP.dll'), False)
+               make_symlink(os.path.join(kh15_folder, 'DBGHELP.dll'), os.path.join(lua_folder, 'DBGHELP.dll'), False)
+         make_symlink(os.path.join(kh15_folder, 'lua54.dll'), os.path.join(lua_folder, 'lua54.dll'), False)
+         if toml_user is not None:
+            make_symlink(os.path.join(kh15_folder, 'LuaBackend.toml'), toml_user, False)
+      if kh28_folder is not None:
+         if is_linux:
+            make_symlink(os.path.join(kh28_folder, 'DINPUT8.dll'), os.path.join(lua_folder, 'DBGHELP.dll'), False)
+         else:
+            if openkh_folder is not None:
+               make_symlink(os.path.join(kh28_folder, 'LuaBackend.dll'), os.path.join(lua_folder, 'DBGHELP.dll'), False)
             else:
-               if openkh_folder is not None:
-                  symlinks[os.path.join(kh28_folder, 'LuaBackend.dll')] = (os.path.join(lua_folder, 'DBGHELP.dll'), False)
-               else:
-                  symlinks[os.path.join(kh28_folder, 'DBGHELP.dll')] = (os.path.join(lua_folder, 'DBGHELP.dll'), False)
-            symlinks[os.path.join(kh28_folder, 'lua54.dll')] = (os.path.join(lua_folder, 'lua54.dll'), False)
-            if toml_user is not None:
-               symlinks[os.path.join(kh28_folder, 'LuaBackend.toml')] = (toml_user, False)
+               make_symlink(os.path.join(kh28_folder, 'DBGHELP.dll'), os.path.join(lua_folder, 'DBGHELP.dll'), False)
+         make_symlink(os.path.join(kh28_folder, 'lua54.dll'), os.path.join(lua_folder, 'lua54.dll'), False)
+         if toml_user is not None:
+            make_symlink(os.path.join(kh28_folder, 'LuaBackend.toml'), toml_user, False)
       if toml_user is not None and openkh_folder is not None and os.path.exists(toml_user):
          with open(toml_user, 'r') as toml_file:
             toml_data = tomlkit.load(toml_file)
@@ -278,7 +373,7 @@ def main():
          for game in ['kh1', 'kh2', 'bbs', 'recom', 'kh3d']:
             if game in toml_data and 'scripts' in toml_data[game]:
                path = os.path.join(openkh_folder, 'mod', game, 'scripts') 
-               windows_path = 'Z:' + path.replace('/', '\\') if is_linux else path
+               windows_path = convert_path(path)
                found = False
                for script in toml_data[game]['scripts']:
                   if script['path'] == windows_path:
@@ -299,12 +394,10 @@ def main():
             print('Moving vanilla KH2 executable')
             os.rename(kh2launch, backup_path)
 
-   for (new, old) in symlinks.items():
-      if old is None:
-         remove_symlink(new)
-      else:
-         path, dir = old
-         symlink(path, new, is_dir=dir)
+   for path in remove_symlinks:
+      if os.path.islink(path):
+         print(f'Removing symlink \'{path}\'')
+         os.remove(path)
 
    if kh15_folder is not None and kh2launch is not None:
       backup_path = os.path.join(kh15_folder, 'KINGDOM HEARTS II FINAL MIX VANILLA.exe')
@@ -574,23 +667,6 @@ def get_settings(settings_path):
       yaml.dump(settings, data_file, sort_keys=False, width=1000)
 
    return (settings, settings != old_settings)
-
-def symlink(existing, new, is_dir=False):
-   if os.path.islink(new):
-      target = os.readlink(new)
-      if target == existing:
-         return
-      print(f'Removing previous symlink in \'{new}\' pointing to \'{target}\'')
-      os.remove(new)
-   if not os.path.exists(new):
-      print(f'Creating symlink in \'{new}\' pointing to \'{existing}\'')
-      os.makedirs(os.path.dirname(new), exist_ok=True)
-      os.symlink(existing, new, target_is_directory=is_dir)
-
-def remove_symlink(path):
-   if os.path.islink(path):
-      print(f'Removing symlink \'{path}\'')
-      os.remove(path)
 
 def yes_no():
    while True:
