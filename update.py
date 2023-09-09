@@ -52,8 +52,33 @@ def main():
    
    if is_linux:
       wineprefix = settings['wineprefix']
-      def convert_path(path):
+      def path_conv_linux(path):
          return subprocess.run(['winepath', '-w', path], check=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=dict(os.environ, WINEPREFIX=wineprefix)).stdout.decode('utf-8').rstrip('\n')
+      def run_program_linux(args):
+         return subprocess.run(['wine' *args], check=True, env=dict(os.environ, WINEPREFIX=wineprefix))
+      def make_launch_linux(name, folder, has_panacea, has_luabackend):
+         path = settings['launch'].get(name)
+         if path is None:
+            return
+         exe = settings['installs'].get(name + '.exe')
+         if exe is None:
+            return
+         os.makedirs(os.path.dirname(path), exist_ok=True)
+         vars = [f'WINEPREFIX="{wineprefix}"','WINEFSYNC=1','WINE_FULLSCREEN_FSR=1']
+         dlls = []
+         if has_panacea and settings['mods'].get('panacea') == True:
+            dlls.append('version=n,b')
+         if has_luabackend and settings['mods'].get('luabackend') is not None:
+            dlls.append('dinput8=n,b')
+         if len(dlls) > 0:
+            vars.append(f'WINEDLLOVERRIDES="{";".join(dlls)}"')
+         with open(path, 'w') as sh_file:
+            sh_file.write(f'#!/bin/sh\ncd "{folder}" || exit 1\n{" ".join(vars)} "{runner_wine}" "{exe}"\n')
+         st = os.stat(path)
+         os.chmod(path, st.st_mode | stat.S_IEXEC)
+      convert_path = path_conv_linux
+      run_program = run_program_linux
+      make_launch = make_launch_linux
       user_folder = os.path.join(wineprefix, 'drive_c/users', os.getlogin())
       runner = settings['runner']
       runner_wine = os.path.join(runner, 'bin/wine')
@@ -92,8 +117,15 @@ def main():
          shutil.rmtree(mfinstall_folder)
    else:
       user_folder = os.path.expanduser('~')
-      def convert_path(path):
+      def convert_path_windows(path):
          return path
+      def run_program_windows(args):
+         return subprocess.run(args, check=True)
+      def make_launch_windows(name, folder, has_panacea, has_luabackend):
+         return
+      convert_path = convert_path_windows
+      run_program = run_program_windows
+      make_launch = make_launch_windows
 
    remove_symlinks.add(os.path.join(user_folder, 'Documents'))
    remove_symlinks.add(os.path.join(user_folder, 'Documents/Kingdom Hearts/Configuration/1638'))
@@ -301,17 +333,11 @@ def main():
                print(f'Extracting {gameid} data (this will take some time)')
                for file in os.listdir(source_folder):
                   if file.startswith(f'{gameid}_') and os.path.splitext(file)[1] == '.hed':
-                     if is_linux:
-                        subprocess.run(['wine', os.path.join(openkh_folder, 'OpenKh.Command.IdxImg.exe'), 'hed', 'extract', '-n', '-o', convert_path(data_folder), convert_path(os.path.join(source_folder, file))], check=True, env=dict(os.environ, WINEPREFIX=wineprefix))
-                     else:
-                        subprocess.run([os.path.join(openkh_folder, 'OpenKh.Command.IdxImg.exe'), 'hed', 'extract', '-n', '-o', data_folder, os.path.join(source_folder, file)], check=True)
+                     run_program([os.path.join(openkh_folder, 'OpenKh.Command.IdxImg.exe'), 'hed', 'extract', '-n', '-o', convert_path(data_folder), convert_path(os.path.join(source_folder, file))])
                for file in os.listdir(os.path.join(data_folder, 'original')):
                   shutil.move(os.path.join(data_folder, 'original', file), data_folder)
             print(f'Building {gameid} mods')
-            if is_linux:
-               subprocess.run(['wine', os.path.join(openkh_folder, 'OpenKh.Command.Patcher.exe'), 'build', '-g', gameid, '-o', convert_path(os.path.join(built_mods_folder, gameid)), '-e', convert_path(enabled_mods_path), '-f', convert_path(write_mods_folder), '-d', convert_path(data_folder)], check=True, env=dict(os.environ, WINEPREFIX=wineprefix))
-            else:
-               subprocess.run([os.path.join(openkh_folder, 'OpenKh.Command.Patcher.exe'), 'build', '-g', gameid, '-o',os.path.join(built_mods_folder, gameid), '-e', enabled_mods_path, '-f', write_mods_folder, '-d', data_folder], check=True)
+            run_program([os.path.join(openkh_folder, 'OpenKh.Command.Patcher.exe'), 'build', '-g', gameid, '-o', convert_path(os.path.join(built_mods_folder, gameid)), '-e', convert_path(enabled_mods_path), '-f', convert_path(write_mods_folder), '-d', convert_path(data_folder)])
             if settings['mods'].get('panacea') != True:
                print(f'Patching {gameid} mods')
                patch_folder = os.path.join(openkh_folder, 'patched')
@@ -320,10 +346,7 @@ def main():
                   for file in os.listdir(backup_folder):
                      shutil.copyfile(os.path.join(backup_folder, file), os.path.join(source_folder, file))
                   shutil.rmtree(backup_folder)
-               if is_linux:
-                  subprocess.run(['wine', os.path.join(openkh_folder, 'OpenKh.Command.Patcher.exe'), 'patch', '-b', convert_path(os.path.join(built_mods_folder, gameid)), '-o', convert_path(patch_folder), '-f', convert_path(source_folder)], check=True, env=dict(os.environ, WINEPREFIX=wineprefix))
-               else:
-                  subprocess.run([os.path.join(openkh_folder, 'OpenKh.Command.Patcher.exe'), 'patch', '-b', os.path.join(built_mods_folder, gameid), '-o', patch_folder, '-f', source_folder], check=True)
+               run_program([os.path.join(openkh_folder, 'OpenKh.Command.Patcher.exe'), 'patch', '-b', convert_path(os.path.join(built_mods_folder, gameid)), '-o', convert_path(patch_folder), '-f', convert_path(source_folder)])
                os.makedirs(backup_folder, exist_ok=True)
                for file in os.listdir(patch_folder):
                   backup_path = os.path.join(backup_folder, file)
@@ -337,55 +360,59 @@ def main():
    if (lua_folder := settings['mods'].get('luabackend')) is not None:
       print('Checking for LuaBackend updates...')
       toml_user = settings['mods'].get('luabackend_config')
-      downloaded = download_latest(settings, 'luabackend', 'https://api.github.com/repos/Sirius902/LuaBackend/releases/latest', lambda x: x['name'] == 'DBGHELP.zip', False, lua_folder, False)
-      if downloaded:
-         toml_default = os.path.join(lua_folder, 'LuaBackend.toml')
-         if toml_user is not None and not os.path.exists(toml_user):
-            print('Creating default LuaBackend.toml configuration')
-            shutil.copyfile(toml_default, toml_user)
+      download_latest(settings, 'luabackend', 'https://api.github.com/repos/Sirius902/LuaBackend/releases/latest', lambda x: x['name'] == 'DBGHELP.zip', False, lua_folder, False)
+      toml_default = os.path.join(lua_folder, 'LuaBackend.toml')
+      if os.path.exists(toml_default):
+         if toml_user is not None:
+            if not os.path.exists(toml_user):
+               print('Creating default LuaBackend.toml configuration')
+               shutil.copyfile(toml_default, toml_user)
+         else:
+            for folder in [kh15_folder, kh28_folder]:
+               if folder is not None:
+                  shutil.copyfile(toml_default, os.path.join(kh15_folder, kh28_folder))
          os.remove(toml_default)
-      if kh15_folder is not None:
+      for folder in [kh15_folder, kh28_folder]:
+         if folder is None:
+            continue
          if is_linux:
-            make_symlink(os.path.join(kh15_folder, 'DINPUT8.dll'), os.path.join(lua_folder, 'DBGHELP.dll'), False)
+            make_symlink(os.path.join(folder, 'DINPUT8.dll'), os.path.join(lua_folder, 'DBGHELP.dll'), False)
          else:
             if openkh_folder is not None:
-               make_symlink(os.path.join(kh15_folder, 'LuaBackend.dll'), os.path.join(lua_folder, 'DBGHELP.dll'), False)
+               make_symlink(os.path.join(folder, 'LuaBackend.dll'), os.path.join(lua_folder, 'DBGHELP.dll'), False)
             else:
-               make_symlink(os.path.join(kh15_folder, 'DBGHELP.dll'), os.path.join(lua_folder, 'DBGHELP.dll'), False)
-         make_symlink(os.path.join(kh15_folder, 'lua54.dll'), os.path.join(lua_folder, 'lua54.dll'), False)
+               make_symlink(os.path.join(folder, 'DBGHELP.dll'), os.path.join(lua_folder, 'DBGHELP.dll'), False)
+         make_symlink(os.path.join(folder, 'lua54.dll'), os.path.join(lua_folder, 'lua54.dll'), False)
          if toml_user is not None:
-            make_symlink(os.path.join(kh15_folder, 'LuaBackend.toml'), toml_user, False)
-      if kh28_folder is not None:
-         if is_linux:
-            make_symlink(os.path.join(kh28_folder, 'DINPUT8.dll'), os.path.join(lua_folder, 'DBGHELP.dll'), False)
-         else:
-            if openkh_folder is not None:
-               make_symlink(os.path.join(kh28_folder, 'LuaBackend.dll'), os.path.join(lua_folder, 'DBGHELP.dll'), False)
-            else:
-               make_symlink(os.path.join(kh28_folder, 'DBGHELP.dll'), os.path.join(lua_folder, 'DBGHELP.dll'), False)
-         make_symlink(os.path.join(kh28_folder, 'lua54.dll'), os.path.join(lua_folder, 'lua54.dll'), False)
-         if toml_user is not None:
-            make_symlink(os.path.join(kh28_folder, 'LuaBackend.toml'), toml_user, False)
-      if toml_user is not None and openkh_folder is not None and os.path.exists(toml_user):
-         with open(toml_user, 'r') as toml_file:
-            toml_data = tomlkit.load(toml_file)
-         changes = False
-         for game in ['kh1', 'kh2', 'bbs', 'recom', 'kh3d']:
-            if game in toml_data and 'scripts' in toml_data[game]:
-               path = os.path.join(openkh_folder, 'mod', game, 'scripts') 
-               windows_path = convert_path(path)
-               found = False
-               for script in toml_data[game]['scripts']:
-                  if script['path'] == windows_path:
-                     found = True
-                     break
-               if not found:
-                  changes = True
-                  print(f'Adding OpenKH scripts folder \'{path}\' to LuaBackend configuration')
-                  toml_data[game]['scripts'].append({'path':windows_path,'relative':False})
-         if changes:
-            with open(toml_user, 'w') as toml_file:
-               tomlkit.dump(toml_data, toml_file)
+            make_symlink(os.path.join(folder, 'LuaBackend.toml'), toml_user, False)
+      if openkh_folder is not None:
+         for folder in [kh15_folder, kh28_folder]:
+            if folder is None:
+               continue
+            toml_path = os.path.join(folder, 'LuaBackend.toml')
+            with open(toml_path, 'r') as toml_file:
+               toml_data = tomlkit.load(toml_file)
+            changes = False
+            for game in ['kh1', 'kh2', 'bbs', 'recom', 'kh3d']:
+               if game in toml_data and 'scripts' in toml_data[game]:
+                  path = os.path.join(openkh_folder, 'mod', game, 'scripts') 
+                  windows_path = convert_path(path)
+                  found = False
+                  for script in toml_data[game]['scripts']:
+                     if 'openkh' in script and script['openkh'] == True:
+                        found = True
+                        if script['path'] != windows_path:
+                           script['path'] = windows_path
+                           print(f'Adding OpenKH scripts folder \'{path}\' to LuaBackend configuration')
+                           changes = True
+                        break
+                  if not found:
+                     changes = True
+                     print(f'Adding OpenKH scripts folder \'{path}\' to LuaBackend configuration')
+                     toml_data[game]['scripts'].append({'path':windows_path,'relative':False,'openkh':True})
+            if changes:
+               with open(toml_user, 'w') as toml_file:
+                  tomlkit.dump(toml_data, toml_file)
    
    if kh15_folder is not None and kh2launch is not None:
       backup_path = os.path.join(kh15_folder, 'KINGDOM HEARTS II FINAL MIX VANILLA.exe')
@@ -406,36 +433,14 @@ def main():
             print('Restoring vanilla KH2 executable')
             os.rename(backup_path, kh2launch)
 
-   def make_launch(name, folder, has_panacea, has_luabackend):
-      path = settings['launch'].get(name)
-      if path is None:
-         return
-      exe = settings['installs'].get(name + '.exe')
-      if exe is None:
-         return
-      os.makedirs(os.path.dirname(path), exist_ok=True)
-      vars = [f'WINEPREFIX="{wineprefix}"','WINEFSYNC=1','WINE_FULLSCREEN_FSR=1']
-      dlls = []
-      if has_panacea and settings['mods'].get('panacea') == True:
-         dlls.append('version=n,b')
-      if has_luabackend and settings['mods'].get('luabackend') is not None:
-         dlls.append('dinput8=n,b')
-      if len(dlls) > 0:
-         vars.append(f'WINEDLLOVERRIDES="{";".join(dlls)}"')
-      with open(path, 'w') as sh_file:
-         sh_file.write(f'#!/bin/sh\ncd "{folder}" || exit 1\n{" ".join(vars)} "{runner_wine}" "{exe}"\n')
-      st = os.stat(path)
-      os.chmod(path, st.st_mode | stat.S_IEXEC)
-
-   if is_linux:
-      make_launch('kh1', settings['installs']['kh1.5+2.5'], True, True)
-      make_launch('kh2', settings['installs']['kh1.5+2.5'], True, True)
-      make_launch('khrecom', settings['installs']['kh1.5+2.5'], True, True)
-      make_launch('khbbs', settings['installs']['kh1.5+2.5'], True, True)
-      make_launch('khddd', settings['installs']['kh2.8'], False, True)
-      make_launch('kh0.2', settings['installs']['kh2.8'], False, False)
-      make_launch('kh3', settings['installs']['kh3'], False, False)
-      make_launch('khmom', settings['installs']['khmom'], False, False)
+   make_launch('kh1', settings['installs']['kh1.5+2.5'], True, True)
+   make_launch('kh2', settings['installs']['kh1.5+2.5'], True, True)
+   make_launch('khrecom', settings['installs']['kh1.5+2.5'], True, True)
+   make_launch('khbbs', settings['installs']['kh1.5+2.5'], True, True)
+   make_launch('khddd', settings['installs']['kh2.8'], False, True)
+   make_launch('kh0.2', settings['installs']['kh2.8'], False, False)
+   make_launch('kh3', settings['installs']['kh3'], False, False)
+   make_launch('khmom', settings['installs']['khmom'], False, False)
 
    with open(settings_path, 'w') as data_file:
       yaml.dump(settings, data_file, sort_keys=False, width=1000)
