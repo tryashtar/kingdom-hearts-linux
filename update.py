@@ -84,9 +84,9 @@ def main():
       user_folder = os.path.join(wineprefix, 'drive_c/users', os.getlogin())
       runner = settings['runner']
       runner_wine = os.path.join(runner, 'bin/wine')
-      if settings['update_runner'] == True:
+      if settings['update_runner'] == True or not os.path.exists(runner):
          print('Checking for runner updates...')
-         download_latest(settings, 'runner', 'https://api.github.com/repos/GloriousEggroll/wine-ge-custom/releases/latest', lambda x: x['name'].endswith('.tar.xz'), True, settings['runner'], True)
+         download_latest(settings, 'runner', 'https://api.github.com/repos/GloriousEggroll/wine-ge-custom/releases/latest', lambda x: x['name'].endswith('.tar.xz'), True, runner, True)
       if not os.path.exists(user_folder):
          subprocess.run(['wineboot'], env=dict(os.environ, WINEPREFIX=wineprefix), check=True)
       winetricks = []
@@ -203,7 +203,7 @@ def main():
       pana_write = pana_settings
       if pana_settings is None:
          pana_write = os.path.join(kh15_folder, 'panacea_settings.txt')
-      if settings['mods']['update_openkh'] == True:
+      if settings['mods']['update_openkh'] == True or not os.path.exists(openkh_folder):
          print('Checking for OpenKH updates...')
          downloaded = download_latest(settings, 'openkh', 'https://api.github.com/repos/OpenKH/OpenKh/releases/tags/latest', lambda x: x['name'] == 'openkh.zip', True, openkh_folder, False)
       else:
@@ -306,7 +306,7 @@ def main():
 
       mod_changes = {'kh2':{'KH2FM-Mods-Num/GoA-ROM-Edition': False, 'KH-ReFined/KH2-VanillaOST': False, 'KH-ReFined/KH2-VanillaEnemy': False, 'KH-ReFined/KH2-MultiAudio': False, 'KH-ReFined/KH2-MAIN': False}}
       if (refined_folder := settings['mods'].get('refined')) is not None:
-         if settings['mods']['update_refined'] == True:
+         if settings['mods']['update_refined'] == True or not os.path.exists(refined_folder):
             print('Checking for ReFined updates...')
             download_latest(settings, 'refined', 'https://api.github.com/repos/TopazTK/KH-ReFined/releases', lambda x: x['name'].endswith('.zip'), False, refined_folder, False)
             download_mod('kh2', 'KH-ReFined/KH2-MAIN')
@@ -316,14 +316,13 @@ def main():
                download_mod('kh2', 'KH-ReFined/KH2-VanillaEnemy')
             if settings['mods'].get('refined.multi_audio') == True:
                download_mod('kh2', 'KH-ReFined/KH2-MultiAudio')
-         if os.path.exists(refined_folder):
-            make_symlink(os.path.join(kh15_folder, 'x64'), os.path.join(refined_folder, 'x64'), True)
-            make_symlink(os.path.join(kh15_folder, 'Keystone.Net.dll'), os.path.join(refined_folder, 'Keystone.Net.dll'), False)
-            if kh2launch is not None:
-               make_symlink(kh2launch, os.path.join(refined_folder, 'KINGDOM HEARTS II FINAL MIX.exe'), False)
-            if (refined_ini := settings['mods'].get('refined_config')) is not None:
-               make_symlink(os.path.join(kh15_folder, 'reFined.ini'), refined_ini, False)
-            backup_vanilla = True
+         make_symlink(os.path.join(kh15_folder, 'x64'), os.path.join(refined_folder, 'x64'), True)
+         make_symlink(os.path.join(kh15_folder, 'Keystone.Net.dll'), os.path.join(refined_folder, 'Keystone.Net.dll'), False)
+         if kh2launch is not None:
+            make_symlink(kh2launch, os.path.join(refined_folder, 'KINGDOM HEARTS II FINAL MIX.exe'), False)
+         if (refined_ini := settings['mods'].get('refined_config')) is not None:
+            make_symlink(os.path.join(kh15_folder, 'reFined.ini'), refined_ini, False)
+         backup_vanilla = True
 
       if (randomizer_folder := settings['mods'].get('randomizer')) is not None:
          print('Checking for Randomizer updates...')
@@ -389,7 +388,7 @@ def main():
       restore_kh15()
    
    if (lua_folder := settings['mods'].get('luabackend')) is not None:
-      if settings['mods']['update_luabackend'] == True:
+      if settings['mods']['update_luabackend'] == True or not os.path.exists(lua_folder):
          print('Checking for LuaBackend updates...')
          download_latest(settings, 'luabackend', 'https://api.github.com/repos/Sirius902/LuaBackend/releases/latest', lambda x: x['name'] == 'DBGHELP.zip', False, lua_folder, False)
       toml_user = settings['mods'].get('luabackend_config')
