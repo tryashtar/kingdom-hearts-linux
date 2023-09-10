@@ -66,7 +66,7 @@ def main():
          if exe is None:
             return
          os.makedirs(os.path.dirname(path), exist_ok=True)
-         vars = [f'WINEPREFIX="{wineprefix}"','WINEFSYNC=1','WINE_FULLSCREEN_FSR=1']
+         vars = [f'WINEPREFIX="{wineprefix}"','WINEFSYNC=1','WINE_FULLSCREEN_FSR=1','WINEDEBUG=-all']
          dlls = []
          if has_panacea and settings['mods'].get('panacea') == True:
             dlls.append('version=n,b')
@@ -86,9 +86,9 @@ def main():
       runner_wine = os.path.join(runner, 'bin/wine')
       if settings['update_runner'] == True:
          print('Checking for runner updates...')
-         new_runner = download_latest(settings, 'runner', 'https://api.github.com/repos/GloriousEggroll/wine-ge-custom/releases/latest', lambda x: x['name'].endswith('.tar.xz'), True, settings['runner'], True)
-      else:
-         new_runner = False
+         download_latest(settings, 'runner', 'https://api.github.com/repos/GloriousEggroll/wine-ge-custom/releases/latest', lambda x: x['name'].endswith('.tar.xz'), True, settings['runner'], True)
+      if not os.path.exists(user_folder):
+         subprocess.run(['wineboot'], env=dict(os.environ, WINEPREFIX=wineprefix), check=True)
       winetricks = []
       if os.path.exists(os.path.join(wineprefix, 'winetricks.log')):
          with open(os.path.join(wineprefix, 'winetricks.log'), 'r') as winetricks_file:
@@ -100,23 +100,9 @@ def main():
          print('Installing dotnet6 to wineprefix')
          subprocess.run(['winetricks', '-q', 'dotnet6'], env=dict(os.environ, WINEPREFIX=wineprefix), check=True)
          subprocess.run(['wine', 'reg', 'add', 'HKEY_CURRENT_USER\\Environment', '/f', '/v', 'DOTNET_ROOT', '/t', 'REG_SZ', '/d', 'C:\\Program Files\\dotnet'], env=dict(os.environ, WINEPREFIX=wineprefix), check=True)
-      if 'vkd3d' not in winetricks:
+      if (kh15_folder is not None or kh28_folder is not None) and 'vkd3d' not in winetricks:
          print('Installing VKD3D to wineprefix')
          subprocess.run(['winetricks', '-q', 'dxvk', 'vkd3d'], env=dict(os.environ, WINEPREFIX=wineprefix), check=True)
-      if (kh3_folder is not None or kh28_folder is not None) and (new_runner or not os.path.exists(os.path.join(wineprefix, 'drive_c/windows/system32/sqmapi.dll'))):
-         print('Running mf-install to fix KH3/KH2.8')
-         mfinstall_folder = tempfile.mkdtemp()
-         subprocess.run(['git', 'clone', 'https://github.com/84KaliPleXon3/mf-install', mfinstall_folder], check=True)
-         sha = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=mfinstall_folder, check=True, stdout=subprocess.PIPE)
-         if sha.stdout != b'19669ca372ddd3993e10dc287132edb172188e3e\n':
-            raise ValueError('mf-install possibly tampered with!')
-         env = os.environ.copy()
-         env['PATH'] = f'{runner}/bin:{env["PATH"]}'
-         env['WINEPREFIX'] = wineprefix
-         subprocess.run(['wineserver', '-w'], check=True)
-         subprocess.run(['wineserver', '-w'], env=env, check=True)
-         subprocess.run(['/bin/sh', os.path.join(mfinstall_folder, 'mf-install.sh')], env=env, check=True)
-         shutil.rmtree(mfinstall_folder)
    else:
       user_folder = os.path.expanduser('~')
       def convert_path_windows(path):
@@ -129,7 +115,8 @@ def main():
       run_program = run_program_windows
       make_launch = make_launch_windows
 
-   remove_symlinks.add(os.path.join(user_folder, 'Documents'))
+   if os.path.islink(os.path.join(user_folder, 'Documents')):
+      os.remove(os.path.join(user_folder, 'Documents'))
    remove_symlinks.add(os.path.join(user_folder, 'Documents/Kingdom Hearts/Configuration/1638'))
    remove_symlinks.add(os.path.join(user_folder, 'Documents/Kingdom Hearts/Save Data/1638'))
    remove_symlinks.add(os.path.join(user_folder, 'Documents/KINGDOM HEARTS HD 1.5+2.5 ReMIX/Epic Games Store/1638'))
@@ -216,8 +203,11 @@ def main():
       pana_write = pana_settings
       if pana_settings is None:
          pana_write = os.path.join(kh15_folder, 'panacea_settings.txt')
-      print('Checking for OpenKH updates...')
-      downloaded = download_latest(settings, 'openkh', 'https://api.github.com/repos/OpenKH/OpenKh/releases/tags/latest', lambda x: x['name'] == 'openkh.zip', True, openkh_folder, False)
+      if settings['mods']['update_openkh'] == True:
+         print('Checking for OpenKH updates...')
+         downloaded = download_latest(settings, 'openkh', 'https://api.github.com/repos/OpenKH/OpenKh/releases/tags/latest', lambda x: x['name'] == 'openkh.zip', True, openkh_folder, False)
+      else:
+         downloaded = False
       if downloaded and not os.path.exists(mods_manager):
          print('Creating default OpenKH mod manager configuration')
          with open(mods_manager, 'w') as mods_file:
@@ -310,21 +300,22 @@ def main():
          if not os.path.exists(patch_folder):
             print(f'Downloading mod {repo}')
             subprocess.run(['git', 'clone', f'https://github.com/{repo}', '--recurse-submodules', patch_folder], check=True)
-            del mod_changes[game][repo]
-         else:
             mod_changes[game][repo] = True
+         else:
+            del mod_changes[game][repo]
 
       mod_changes = {'kh2':{'KH2FM-Mods-Num/GoA-ROM-Edition': False, 'KH-ReFined/KH2-VanillaOST': False, 'KH-ReFined/KH2-VanillaEnemy': False, 'KH-ReFined/KH2-MultiAudio': False, 'KH-ReFined/KH2-MAIN': False}}
       if (refined_folder := settings['mods'].get('refined')) is not None:
-         print('Checking for ReFined updates...')
-         download_latest(settings, 'refined', 'https://api.github.com/repos/TopazTK/KH-ReFined/releases', lambda x: x['name'].endswith('.zip'), False, refined_folder, False)
-         download_mod('kh2', 'KH-ReFined/KH2-MAIN')
-         if settings['mods'].get('refined.vanilla_ost') == True:
-            download_mod('kh2', 'KH-ReFined/KH2-VanillaOST')
-         if settings['mods'].get('refined.vanilla_enemies') == True:
-            download_mod('kh2', 'KH-ReFined/KH2-VanillaEnemy')
-         if settings['mods'].get('refined.multi_audio') == True:
-            download_mod('kh2', 'KH-ReFined/KH2-MultiAudio')
+         if settings['mods']['update_refined'] == True:
+            print('Checking for ReFined updates...')
+            download_latest(settings, 'refined', 'https://api.github.com/repos/TopazTK/KH-ReFined/releases', lambda x: x['name'].endswith('.zip'), False, refined_folder, False)
+            download_mod('kh2', 'KH-ReFined/KH2-MAIN')
+            if settings['mods'].get('refined.vanilla_ost') == True:
+               download_mod('kh2', 'KH-ReFined/KH2-VanillaOST')
+            if settings['mods'].get('refined.vanilla_enemies') == True:
+               download_mod('kh2', 'KH-ReFined/KH2-VanillaEnemy')
+            if settings['mods'].get('refined.multi_audio') == True:
+               download_mod('kh2', 'KH-ReFined/KH2-MultiAudio')
          if os.path.exists(refined_folder):
             make_symlink(os.path.join(kh15_folder, 'x64'), os.path.join(refined_folder, 'x64'), True)
             make_symlink(os.path.join(kh15_folder, 'Keystone.Net.dll'), os.path.join(refined_folder, 'Keystone.Net.dll'), False)
@@ -339,11 +330,12 @@ def main():
          download_latest(settings, 'randomizer', 'https://api.github.com/repos/tommadness/KH2Randomizer/releases/latest', lambda x: x['name'] == 'Kingdom.Hearts.II.Final.Mix.Randomizer.zip', False, randomizer_folder, False)
          download_mod('kh2', 'KH2FM-Mods-Num/GoA-ROM-Edition')
 
-      if os.path.exists(write_mods_folder):
-         for dir in [os.path.join(dp, f) for dp, dn, _ in os.walk(write_mods_folder) for f in dn]:
-            if os.path.exists(os.path.join(dir, '.git')):
-               print(f'Checking for updates for mod {os.path.basename(dir)}')
-               subprocess.run(['git', 'pull', '--recurse-submodules'], cwd=dir, check=True)
+      if settings['mods']['update_openkh_mods'] == True:
+         if os.path.exists(write_mods_folder):
+            for dir in [os.path.join(dp, f) for dp, dn, _ in os.walk(write_mods_folder) for f in dn]:
+               if os.path.exists(os.path.join(dir, '.git')):
+                  print(f'Checking for updates for mod {os.path.basename(dir)}')
+                  subprocess.run(['git', 'pull', '--recurse-submodules'], cwd=dir, check=True)
       if 'last_build' not in settings:
          settings['last_build'] = {}
       for gameid, txtid in [('kh1', 'KH1'), ('kh2', 'KH2'), ('bbs', 'BBS'), ('Recom', 'ReCoM')]:
@@ -397,9 +389,10 @@ def main():
       restore_kh15()
    
    if (lua_folder := settings['mods'].get('luabackend')) is not None:
-      print('Checking for LuaBackend updates...')
+      if settings['mods']['update_luabackend'] == True:
+         print('Checking for LuaBackend updates...')
+         download_latest(settings, 'luabackend', 'https://api.github.com/repos/Sirius902/LuaBackend/releases/latest', lambda x: x['name'] == 'DBGHELP.zip', False, lua_folder, False)
       toml_user = settings['mods'].get('luabackend_config')
-      download_latest(settings, 'luabackend', 'https://api.github.com/repos/Sirius902/LuaBackend/releases/latest', lambda x: x['name'] == 'DBGHELP.zip', False, lua_folder, False)
       toml_default = os.path.join(lua_folder, 'LuaBackend.toml')
       if os.path.exists(toml_default):
          if toml_user is not None:
@@ -648,13 +641,12 @@ def get_settings(settings_path):
       saves = os.path.join(base_folder, 'Save Data')
       settings['saves'] = {'kh1.5+2.5': os.path.join(saves, 'Kingdom Hearts 1.5+2.5'), 'kh2.8': os.path.join(saves, 'Kingdom Hearts 2.8'), 'kh3': os.path.join(saves, 'Kingdom Hearts III'), 'khmom': os.path.join(saves, 'Kingdom Hearts Melody of Memory')}
 
-   supports_mods = settings['installs']['kh1.5+2.5'] is not None or settings['installs']['kh2.8'] is not None
    if 'mods' not in settings:
       settings['mods'] = {'folder': os.path.join(base_folder, 'Mods')}
-      if supports_mods:
+      if settings['installs']['kh1.5+2.5'] is not None or settings['installs']['kh2.8'] is not None:
          print('Modding applications to use:')
          print()
-   if supports_mods:
+   if settings['installs']['kh1.5+2.5'] is not None:
       if 'refined' not in settings['mods'] and settings['installs']['kh1.5+2.5'] is not None:
          print('Kingdom Hearts ReFined: (y/n)')
          settings['mods']['refined'] = os.path.join(base_folder, 'ReFined') if yes_no() else None
@@ -665,6 +657,8 @@ def get_settings(settings_path):
          if 'openkh' not in settings['mods']:
             settings['mods']['openkh'] = os.path.join(base_folder, 'OpenKH')
       if settings['mods']['refined'] is not None:
+         if 'update_refined' not in settings['mods']:
+            settings['mods']['update_refined'] = True
          if 'refined.vanilla_ost' not in settings['mods']:
             print('ReFined addon: Vanilla OST toggle (y/n)')
             settings['mods']['refined.vanilla_ost'] = yes_no()
@@ -692,6 +686,11 @@ def get_settings(settings_path):
          print('OpenKh mod manager: (y/n)')
          settings['mods']['openkh'] = os.path.join(base_folder, 'OpenKH') if yes_no() else None
          print()
+      if settings['mods']['openkh'] is not None:
+         if 'update_openkh' not in settings['mods']:
+            settings['mods']['update_openkh'] = True
+         if 'update_openkh_mods' not in settings['mods']:
+            settings['mods']['update_openkh_mods'] = True
       if settings['mods']['openkh'] is not None and 'panacea' not in settings['mods']:
          print('Panacea mod loader: (y/n)')
          settings['mods']['panacea'] = yes_no()
@@ -699,11 +698,14 @@ def get_settings(settings_path):
       if settings['mods'].get('panacea') == True:
          if 'panacea_settings' not in settings['mods']:
             settings['mods']['panacea_settings'] = os.path.join(base_folder, 'panacea_settings.txt')
+   if settings['installs']['kh1.5+2.5'] is not None or settings['installs']['kh2.8'] is not None:
       if 'luabackend' not in settings['mods']:
          print('LuaBackend script loader: (y/n)')
          settings['mods']['luabackend'] = os.path.join(base_folder, 'LuaBackend') if yes_no() else None
          print()
       if settings['mods']['luabackend'] is not None:
+         if 'update_luabackend' not in settings['mods']:
+            settings['mods']['update_luabackend'] = True
          if 'luabackend_config' not in settings['mods']:
             settings['mods']['luabackend_config'] = os.path.join(base_folder, 'LuaBackend.toml')
 
