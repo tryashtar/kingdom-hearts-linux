@@ -59,6 +59,8 @@ def main():
          cmds.extend(args)
          return subprocess.run(cmds, check=True, env=dict(os.environ, WINEPREFIX=wineprefix))
       def make_launch_linux(name, folder, has_panacea, has_luabackend):
+         if folder is None:
+            return
          path = settings['launch'].get(name)
          if path is None:
             return 
@@ -150,12 +152,10 @@ def main():
       if kh2launch is not None:
          remove_symlinks.add(kh2launch)
       remove_symlinks.add(os.path.join(kh15_folder, 'reFined.ini'))
-      if is_linux:
-         remove_symlinks.add(os.path.join(kh15_folder, 'version.dll'))
-         remove_symlinks.add(os.path.join(kh15_folder, 'DINPUT8.dll'))
-      else:
-         remove_symlinks.add(os.path.join(kh15_folder, 'DBGHELP.dll'))
-         remove_symlinks.add(os.path.join(kh15_folder, 'LuaBackend.dll'))
+      remove_symlinks.add(os.path.join(kh15_folder, 'version.dll'))
+      remove_symlinks.add(os.path.join(kh15_folder, 'DINPUT8.dll'))
+      remove_symlinks.add(os.path.join(kh15_folder, 'DBGHELP.dll'))
+      remove_symlinks.add(os.path.join(kh15_folder, 'LuaBackend.dll'))
       remove_symlinks.add(os.path.join(kh15_folder, 'panacea_settings.txt'))
       remove_symlinks.add(os.path.join(kh15_folder, 'lua54.dll'))
       remove_symlinks.add(os.path.join(kh15_folder, 'LuaBackend.toml'))
@@ -178,9 +178,8 @@ def main():
       if is_linux and os.path.exists(epic_folder) and len(os.listdir(epic_folder)) > 0:
          print('Renaming KH 2.8 EPIC folder to EPIC.bak to prevent crashes during FMVs')
          os.rename(epic_folder, os.path.join(kh28_folder, 'EPIC.bak'))
-         remove_symlinks.add(os.path.join(kh28_folder, 'DINPUT8.dll'))
-      else:
-         remove_symlinks.add(os.path.join(kh28_folder, 'DBGHELP.dll'))
+      remove_symlinks.add(os.path.join(kh28_folder, 'DINPUT8.dll'))
+      remove_symlinks.add(os.path.join(kh28_folder, 'DBGHELP.dll'))
       remove_symlinks.add(os.path.join(kh28_folder, 'lua54.dll'))
       remove_symlinks.add(os.path.join(kh28_folder, 'LuaBackend.toml'))
 
@@ -201,7 +200,7 @@ def main():
       mods_manager = os.path.join(openkh_folder, 'mods-manager.yml')
       pana_settings = settings['mods'].get('panacea_settings')
       pana_write = pana_settings
-      if pana_settings is None:
+      if pana_settings is None and kh15_folder is not None:
          pana_write = os.path.join(kh15_folder, 'panacea_settings.txt')
       if settings['mods']['update_openkh'] == True or not os.path.exists(openkh_folder):
          print('Checking for OpenKH updates...')
@@ -216,7 +215,7 @@ def main():
             print('Creating default panacea configuration')
             with open(pana_write, 'w') as pana_file:
                pana_file.write('show_console=False')
-      if settings['mods'].get('panacea') == True:
+      if settings['mods'].get('panacea') == True and kh15_folder is not None:
          if is_linux:
             make_symlink(os.path.join(kh15_folder, 'version.dll'), os.path.join(openkh_folder, 'OpenKH.Panacea.dll'), False)
          else:
@@ -273,7 +272,7 @@ def main():
          make_symlink(os.path.join(openkh_folder, 'mods-KH2.txt'), os.path.join(custom_mods_folder, 'kh2.txt'), False)
          make_symlink(os.path.join(openkh_folder, 'mods-BBS.txt'), os.path.join(custom_mods_folder, 'bbs.txt'), False)
          make_symlink(os.path.join(openkh_folder, 'mods-ReCoM.txt'), os.path.join(custom_mods_folder, 'Recom.txt'), False)
-      if os.path.exists(mods_manager):
+      if os.path.exists(mods_manager) and kh15_folder is not None:
          changes = False
          with open(mods_manager, 'r') as mods_file:
             mods_data = yaml.safe_load(mods_file)
@@ -316,18 +315,27 @@ def main():
                download_mod('kh2', 'KH-ReFined/KH2-VanillaEnemy')
             if settings['mods'].get('refined.multi_audio') == True:
                download_mod('kh2', 'KH-ReFined/KH2-MultiAudio')
-         make_symlink(os.path.join(kh15_folder, 'x64'), os.path.join(refined_folder, 'x64'), True)
-         make_symlink(os.path.join(kh15_folder, 'Keystone.Net.dll'), os.path.join(refined_folder, 'Keystone.Net.dll'), False)
-         if kh2launch is not None:
-            make_symlink(kh2launch, os.path.join(refined_folder, 'KINGDOM HEARTS II FINAL MIX.exe'), False)
-         if (refined_ini := settings['mods'].get('refined_config')) is not None:
-            make_symlink(os.path.join(kh15_folder, 'reFined.ini'), refined_ini, False)
-         backup_vanilla = True
+         else:
+            del mod_changes['kh2']['KH-ReFined/KH2-VanillaOST']
+            del mod_changes['kh2']['KH-ReFined/KH2-VanillaEnemy']
+            del mod_changes['kh2']['KH-ReFined/KH2-MultiAudio']
+            del mod_changes['kh2']['KH-ReFined/KH2-MAIN']
+         if kh15_folder is not None:
+            make_symlink(os.path.join(kh15_folder, 'x64'), os.path.join(refined_folder, 'x64'), True)
+            make_symlink(os.path.join(kh15_folder, 'Keystone.Net.dll'), os.path.join(refined_folder, 'Keystone.Net.dll'), False)
+            if kh2launch is not None:
+               make_symlink(kh2launch, os.path.join(refined_folder, 'KINGDOM HEARTS II FINAL MIX.exe'), False)
+            if (refined_ini := settings['mods'].get('refined_config')) is not None:
+               make_symlink(os.path.join(kh15_folder, 'reFined.ini'), refined_ini, False)
+            backup_vanilla = True
 
       if (randomizer_folder := settings['mods'].get('randomizer')) is not None:
-         print('Checking for Randomizer updates...')
-         download_latest(settings, 'randomizer', 'https://api.github.com/repos/tommadness/KH2Randomizer/releases/latest', lambda x: x['name'] == 'Kingdom.Hearts.II.Final.Mix.Randomizer.zip', False, randomizer_folder, False)
-         download_mod('kh2', 'KH2FM-Mods-Num/GoA-ROM-Edition')
+         if settings['mods']['update_randomizer'] == True or not os.path.exists(randomizer_folder):
+            print('Checking for Randomizer updates...')
+            download_latest(settings, 'randomizer', 'https://api.github.com/repos/tommadness/KH2Randomizer/releases/latest', lambda x: x['name'] == 'Kingdom.Hearts.II.Final.Mix.Randomizer.zip', False, randomizer_folder, False)
+            download_mod('kh2', 'KH2FM-Mods-Num/GoA-ROM-Edition')
+         else:
+            del mod_changes['kh2']['KH2FM-Mods-Num/GoA-ROM-Edition']
 
       if settings['mods']['update_openkh_mods'] == True:
          if os.path.exists(write_mods_folder):
@@ -337,53 +345,54 @@ def main():
                   subprocess.run(['git', 'pull', '--recurse-submodules'], cwd=dir, check=True)
       if 'last_build' not in settings:
          settings['last_build'] = {}
-      for gameid, txtid in [('kh1', 'KH1'), ('kh2', 'KH2'), ('bbs', 'BBS'), ('Recom', 'ReCoM')]:
-         enabled_mods_path = os.path.join(openkh_folder, f'mods-{txtid}.txt')
-         if os.path.exists(enabled_mods_path):
-            with open(enabled_mods_path, 'r') as enabled_file:
-               enabled_mods = [line.rstrip('\n') for line in enabled_file]
-         else:
-            enabled_mods = []
-         if gameid in mod_changes:
-            for mod,enabled in mod_changes[gameid].items():
-               if enabled and mod not in enabled_mods:
-                  print(f'Enabling {gameid} mod {mod}')
-                  enabled_mods.append(mod)
-               elif not enabled and mod in enabled_mods:
-                  print(f'Disabling {gameid} mod {mod}')
-                  enabled_mods.remove(mod)
-         last_build = settings['last_build'].get(gameid, [])
-         if enabled_mods != last_build:
-            with open(enabled_mods_path, 'w') as enabled_file:
-               for line in enabled_mods:
-                  enabled_file.write(line + '\n')
-            data_folder = os.path.join(openkh_folder, 'data', gameid)
-            source_folder = os.path.join(kh15_folder, 'Image/en')
-            restore_kh15()
-            if not os.path.exists(data_folder):
-               print(f'Extracting {gameid} data (this will take some time)')
-               for file in os.listdir(source_folder):
-                  if file.startswith(f'{gameid}_') and os.path.splitext(file)[1] == '.hed':
-                     run_program([os.path.join(openkh_folder, 'OpenKh.Command.IdxImg.exe'), 'hed', 'extract', '-n', '-o', convert_path(data_folder), convert_path(os.path.join(source_folder, file))])
-               for file in os.listdir(os.path.join(data_folder, 'original')):
-                  shutil.move(os.path.join(data_folder, 'original', file), data_folder)
-            print(f'Building {gameid} mods')
-            run_program([os.path.join(openkh_folder, 'OpenKh.Command.Patcher.exe'), 'build', '-g', gameid, '-o', convert_path(os.path.join(built_mods_folder, gameid)), '-e', convert_path(enabled_mods_path), '-f', convert_path(os.path.join(write_mods_folder, gameid)), '-d', convert_path(data_folder)])
-            patch_folder = os.path.join(openkh_folder, 'patched')
-            if settings['mods'].get('panacea') != True:
-               backup_folder = os.path.join(kh15_folder, 'BackupImage')
+      if kh15_folder is not None:
+         for gameid, txtid in [('kh1', 'KH1'), ('kh2', 'KH2'), ('bbs', 'BBS'), ('Recom', 'ReCoM')]:
+            enabled_mods_path = os.path.join(openkh_folder, f'mods-{txtid}.txt')
+            if os.path.exists(enabled_mods_path):
+               with open(enabled_mods_path, 'r') as enabled_file:
+                  enabled_mods = [line.rstrip('\n') for line in enabled_file]
+            else:
+               enabled_mods = []
+            if gameid in mod_changes:
+               for mod,enabled in mod_changes[gameid].items():
+                  if enabled and mod not in enabled_mods:
+                     print(f'Enabling {gameid} mod {mod}')
+                     enabled_mods.append(mod)
+                  elif not enabled and mod in enabled_mods:
+                     print(f'Disabling {gameid} mod {mod}')
+                     enabled_mods.remove(mod)
+            last_build = settings['last_build'].get(gameid, [])
+            if enabled_mods != last_build:
+               with open(enabled_mods_path, 'w') as enabled_file:
+                  for line in enabled_mods:
+                     enabled_file.write(line + '\n')
+               data_folder = os.path.join(openkh_folder, 'data', gameid)
                source_folder = os.path.join(kh15_folder, 'Image/en')
-               print(f'Patching {gameid} mods')
-               run_program([os.path.join(openkh_folder, 'OpenKh.Command.Patcher.exe'), 'patch', '-b', convert_path(os.path.join(built_mods_folder, gameid)), '-o', convert_path(patch_folder), '-f', convert_path(source_folder)])
-               os.makedirs(backup_folder, exist_ok=True)
-               for file in os.listdir(patch_folder):
-                  backup_path = os.path.join(backup_folder, file)
-                  write_path = os.path.join(source_folder, file)
-                  if not os.path.exists(backup_path):
-                     shutil.copyfile(write_path, backup_path)
-                  shutil.copyfile(os.path.join(patch_folder, file), write_path)
-               shutil.rmtree(patch_folder)
-            settings['last_build'][gameid] = enabled_mods
+               restore_kh15()
+               if not os.path.exists(data_folder):
+                  print(f'Extracting {gameid} data (this will take some time)')
+                  for file in os.listdir(source_folder):
+                     if file.startswith(f'{gameid}_') and os.path.splitext(file)[1] == '.hed':
+                        run_program([os.path.join(openkh_folder, 'OpenKh.Command.IdxImg.exe'), 'hed', 'extract', '-n', '-o', convert_path(data_folder), convert_path(os.path.join(source_folder, file))])
+                  for file in os.listdir(os.path.join(data_folder, 'original')):
+                     shutil.move(os.path.join(data_folder, 'original', file), data_folder)
+               print(f'Building {gameid} mods')
+               run_program([os.path.join(openkh_folder, 'OpenKh.Command.Patcher.exe'), 'build', '-g', gameid, '-o', convert_path(os.path.join(built_mods_folder, gameid)), '-e', convert_path(enabled_mods_path), '-f', convert_path(os.path.join(write_mods_folder, gameid)), '-d', convert_path(data_folder)])
+               patch_folder = os.path.join(openkh_folder, 'patched')
+               if settings['mods'].get('panacea') != True:
+                  backup_folder = os.path.join(kh15_folder, 'BackupImage')
+                  source_folder = os.path.join(kh15_folder, 'Image/en')
+                  print(f'Patching {gameid} mods')
+                  run_program([os.path.join(openkh_folder, 'OpenKh.Command.Patcher.exe'), 'patch', '-b', convert_path(os.path.join(built_mods_folder, gameid)), '-o', convert_path(patch_folder), '-f', convert_path(source_folder)])
+                  os.makedirs(backup_folder, exist_ok=True)
+                  for file in os.listdir(patch_folder):
+                     backup_path = os.path.join(backup_folder, file)
+                     write_path = os.path.join(source_folder, file)
+                     if not os.path.exists(backup_path):
+                        shutil.copyfile(write_path, backup_path)
+                     shutil.copyfile(os.path.join(patch_folder, file), write_path)
+                  shutil.rmtree(patch_folder)
+               settings['last_build'][gameid] = enabled_mods
    else:
       restore_kh15()
    
@@ -464,14 +473,14 @@ def main():
             print('Restoring vanilla KH2 executable')
             os.rename(backup_path, kh2launch)
 
-   make_launch('kh1', settings['installs']['kh1.5+2.5'], True, True)
-   make_launch('kh2', settings['installs']['kh1.5+2.5'], True, True)
-   make_launch('khrecom', settings['installs']['kh1.5+2.5'], True, True)
-   make_launch('khbbs', settings['installs']['kh1.5+2.5'], True, True)
-   make_launch('khddd', settings['installs']['kh2.8'], False, True)
-   make_launch('kh0.2', settings['installs']['kh2.8'], False, False)
-   make_launch('kh3', settings['installs']['kh3'], False, False)
-   make_launch('khmom', settings['installs']['khmom'], False, False)
+   make_launch('kh1', kh15_folder, True, True)
+   make_launch('kh2', kh15_folder, True, True)
+   make_launch('khrecom', kh15_folder, True, True)
+   make_launch('khbbs', kh15_folder, True, True)
+   make_launch('khddd', kh28_folder, False, True)
+   make_launch('kh0.2', kh28_folder, False, False)
+   make_launch('kh3', kh3_folder, False, False)
+   make_launch('khmom', khmom_folder, False, False)
 
    with open(settings_path, 'w') as data_file:
       yaml.dump(settings, data_file, sort_keys=False, width=1000)
@@ -675,6 +684,8 @@ def get_settings(settings_path):
          settings['mods']['randomizer'] = os.path.join(base_folder, 'Randomizer') if yes_no() else None
          print()
       if settings['mods']['randomizer'] is not None:
+         if 'update_randomizer' not in settings['mods']:
+            settings['mods']['update_randomizer'] = True
          if 'openkh' not in settings['mods']:
             settings['mods']['openkh'] = os.path.join(base_folder, 'OpenKH')
          if 'luabackend' not in settings['mods']:
