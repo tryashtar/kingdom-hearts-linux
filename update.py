@@ -170,6 +170,7 @@ def main():
       remove_symlinks.add(os.path.join(kh15_folder, 'panacea_settings.txt'))
       remove_symlinks.add(os.path.join(kh15_folder, 'lua54.dll'))
       remove_symlinks.add(os.path.join(kh15_folder, 'LuaBackend.toml'))
+   
    if kh28_folder is not None:
       epic_folder = os.path.join(kh28_folder, 'EPIC')
       if is_linux and os.path.exists(epic_folder) and len(os.listdir(epic_folder)) > 0:
@@ -180,6 +181,16 @@ def main():
          remove_symlinks.add(os.path.join(kh28_folder, 'DBGHELP.dll'))
       remove_symlinks.add(os.path.join(kh28_folder, 'lua54.dll'))
       remove_symlinks.add(os.path.join(kh28_folder, 'LuaBackend.toml'))
+
+   def restore_kh15():
+      if kh15_folder is None:
+         return
+      backup_folder = os.path.join(kh15_folder, 'BackupImage')
+      source_folder = os.path.join(kh15_folder, 'Image/en')
+      if os.path.exists(backup_folder):
+         for file in os.listdir(backup_folder):
+            shutil.copyfile(os.path.join(backup_folder, file), os.path.join(source_folder, file))
+         shutil.rmtree(backup_folder)
 
    if openkh_folder is not None:
       default_mods_folder = os.path.join(openkh_folder, 'mods')
@@ -329,6 +340,7 @@ def main():
                   enabled_file.write(line + '\n')
             data_folder = os.path.join(openkh_folder, 'data', gameid)
             source_folder = os.path.join(kh15_folder, 'Image/en')
+            restore_kh15()
             if not os.path.exists(data_folder):
                print(f'Extracting {gameid} data (this will take some time)')
                for file in os.listdir(source_folder):
@@ -338,14 +350,11 @@ def main():
                   shutil.move(os.path.join(data_folder, 'original', file), data_folder)
             print(f'Building {gameid} mods')
             run_program([os.path.join(openkh_folder, 'OpenKh.Command.Patcher.exe'), 'build', '-g', gameid, '-o', convert_path(os.path.join(built_mods_folder, gameid)), '-e', convert_path(enabled_mods_path), '-f', convert_path(write_mods_folder), '-d', convert_path(data_folder)])
+            patch_folder = os.path.join(openkh_folder, 'patched')
             if settings['mods'].get('panacea') != True:
-               print(f'Patching {gameid} mods')
-               patch_folder = os.path.join(openkh_folder, 'patched')
                backup_folder = os.path.join(kh15_folder, 'BackupImage')
-               if os.path.exists(backup_folder):
-                  for file in os.listdir(backup_folder):
-                     shutil.copyfile(os.path.join(backup_folder, file), os.path.join(source_folder, file))
-                  shutil.rmtree(backup_folder)
+               source_folder = os.path.join(kh15_folder, 'Image/en')
+               print(f'Patching {gameid} mods')
                run_program([os.path.join(openkh_folder, 'OpenKh.Command.Patcher.exe'), 'patch', '-b', convert_path(os.path.join(built_mods_folder, gameid)), '-o', convert_path(patch_folder), '-f', convert_path(source_folder)])
                os.makedirs(backup_folder, exist_ok=True)
                for file in os.listdir(patch_folder):
@@ -356,7 +365,9 @@ def main():
                   shutil.copyfile(os.path.join(patch_folder, file), write_path)
                shutil.rmtree(patch_folder)
             settings['last_build'][gameid] = enabled_mods
-
+   else:
+      restore_kh15()
+   
    if (lua_folder := settings['mods'].get('luabackend')) is not None:
       print('Checking for LuaBackend updates...')
       toml_user = settings['mods'].get('luabackend_config')
