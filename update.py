@@ -55,11 +55,13 @@ def main():
       def path_conv_linux(path):
          return subprocess.run(['winepath', '-w', path], check=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=dict(os.environ, WINEPREFIX=wineprefix)).stdout.decode('utf-8').rstrip('\n')
       def run_program_linux(args):
-         return subprocess.run(['wine' *args], check=True, env=dict(os.environ, WINEPREFIX=wineprefix))
+         cmds = ['wine']
+         cmds.extend(args)
+         return subprocess.run(cmds, check=True, env=dict(os.environ, WINEPREFIX=wineprefix))
       def make_launch_linux(name, folder, has_panacea, has_luabackend):
          path = settings['launch'].get(name)
          if path is None:
-            return
+            return 
          exe = settings['installs'].get(name + '.exe')
          if exe is None:
             return
@@ -170,6 +172,19 @@ def main():
       remove_symlinks.add(os.path.join(kh15_folder, 'panacea_settings.txt'))
       remove_symlinks.add(os.path.join(kh15_folder, 'lua54.dll'))
       remove_symlinks.add(os.path.join(kh15_folder, 'LuaBackend.toml'))
+      remove_symlinks.add(os.path.join(kh15_folder, "avcodec-vgmstream-59.dll"))
+      remove_symlinks.add(os.path.join(kh15_folder, "avformat-vgmstream-59.dll"))
+      remove_symlinks.add(os.path.join(kh15_folder, "avutil-vgmstream-57.dll"))
+      remove_symlinks.add(os.path.join(kh15_folder, "bass.dll"))
+      remove_symlinks.add(os.path.join(kh15_folder, "bass_vgmstream.dll"))
+      remove_symlinks.add(os.path.join(kh15_folder, "libatrac9.dll"))
+      remove_symlinks.add(os.path.join(kh15_folder, "libcelt-0061.dll"))
+      remove_symlinks.add(os.path.join(kh15_folder, "libcelt-0110.dll"))
+      remove_symlinks.add(os.path.join(kh15_folder, "libg719_decode.dll"))
+      remove_symlinks.add(os.path.join(kh15_folder, "libmpg123-0.dll"))
+      remove_symlinks.add(os.path.join(kh15_folder, "libspeex-1.dll"))
+      remove_symlinks.add(os.path.join(kh15_folder, "libvorbis.dll"))
+      remove_symlinks.add(os.path.join(kh15_folder, "swresample-vgmstream-4.dll"))
    
    if kh28_folder is not None:
       epic_folder = os.path.join(kh28_folder, 'EPIC')
@@ -216,6 +231,19 @@ def main():
             make_symlink(os.path.join(kh15_folder, 'version.dll'), os.path.join(openkh_folder, 'OpenKH.Panacea.dll'), False)
          else:
             make_symlink(os.path.join(kh15_folder, 'DBGHELP.dll'), os.path.join(openkh_folder, 'OpenKH.Panacea.dll'), False)
+         make_symlink(os.path.join(kh15_folder, "avcodec-vgmstream-59.dll"), os.path.join(openkh_folder, "avcodec-vgmstream-59.dll"), False)
+         make_symlink(os.path.join(kh15_folder, "avformat-vgmstream-59.dll"), os.path.join(openkh_folder, "avformat-vgmstream-59.dll"), False)
+         make_symlink(os.path.join(kh15_folder, "avutil-vgmstream-57.dll"), os.path.join(openkh_folder, "avutil-vgmstream-57.dll"), False)
+         make_symlink(os.path.join(kh15_folder, "bass.dll"), os.path.join(openkh_folder, "bass.dll"), False)
+         make_symlink(os.path.join(kh15_folder, "bass_vgmstream.dll"), os.path.join(openkh_folder, "bass_vgmstream.dll"), False)
+         make_symlink(os.path.join(kh15_folder, "libatrac9.dll"), os.path.join(openkh_folder, "libatrac9.dll"), False)
+         make_symlink(os.path.join(kh15_folder, "libcelt-0061.dll"), os.path.join(openkh_folder, "libcelt-0061.dll"), False)
+         make_symlink(os.path.join(kh15_folder, "libcelt-0110.dll"), os.path.join(openkh_folder, "libcelt-0110.dll"), False)
+         make_symlink(os.path.join(kh15_folder, "libg719_decode.dll"), os.path.join(openkh_folder, "libg719_decode.dll"), False)
+         make_symlink(os.path.join(kh15_folder, "libmpg123-0.dll"), os.path.join(openkh_folder, "libmpg123-0.dll"), False)
+         make_symlink(os.path.join(kh15_folder, "libspeex-1.dll"), os.path.join(openkh_folder, "libspeex-1.dll"), False)
+         make_symlink(os.path.join(kh15_folder, "libvorbis.dll"), os.path.join(openkh_folder, "libvorbis.dll"), False)
+         make_symlink(os.path.join(kh15_folder, "swresample-vgmstream-4.dll"), os.path.join(openkh_folder, "swresample-vgmstream-4.dll"), False)
          if pana_settings is not None:
             make_symlink(os.path.join(kh15_folder, 'panacea_settings.txt'), pana_settings, False)
       built_mods_folder = os.path.join(openkh_folder, 'mod')
@@ -349,7 +377,7 @@ def main():
                for file in os.listdir(os.path.join(data_folder, 'original')):
                   shutil.move(os.path.join(data_folder, 'original', file), data_folder)
             print(f'Building {gameid} mods')
-            run_program([os.path.join(openkh_folder, 'OpenKh.Command.Patcher.exe'), 'build', '-g', gameid, '-o', convert_path(os.path.join(built_mods_folder, gameid)), '-e', convert_path(enabled_mods_path), '-f', convert_path(write_mods_folder), '-d', convert_path(data_folder)])
+            run_program([os.path.join(openkh_folder, 'OpenKh.Command.Patcher.exe'), 'build', '-g', gameid, '-o', convert_path(os.path.join(built_mods_folder, gameid)), '-e', convert_path(enabled_mods_path), '-f', convert_path(os.path.join(write_mods_folder, gameid)), '-d', convert_path(data_folder)])
             patch_folder = os.path.join(openkh_folder, 'patched')
             if settings['mods'].get('panacea') != True:
                backup_folder = os.path.join(kh15_folder, 'BackupImage')
