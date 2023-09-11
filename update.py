@@ -149,6 +149,7 @@ def main():
          os.rename(epic_folder, os.path.join(kh15_folder, 'EPIC.bak'))
       remove_symlinks.add(os.path.join(kh15_folder, 'x64'))
       remove_symlinks.add(os.path.join(kh15_folder, 'Keystone.Net.dll'))
+      remove_symlinks.add(os.path.join(kh15_folder, 'Newtonsoft.Json.dll'))
       if kh2launch is not None:
          remove_symlinks.add(kh2launch)
       remove_symlinks.add(os.path.join(kh15_folder, 'reFined.ini'))
@@ -321,8 +322,12 @@ def main():
             del mod_changes['kh2']['KH-ReFined/KH2-MultiAudio']
             del mod_changes['kh2']['KH-ReFined/KH2-MAIN']
          if kh15_folder is not None:
-            make_symlink(os.path.join(kh15_folder, 'x64'), os.path.join(refined_folder, 'x64'), True)
-            make_symlink(os.path.join(kh15_folder, 'Keystone.Net.dll'), os.path.join(refined_folder, 'Keystone.Net.dll'), False)
+            if os.path.exists(os.path.join(refined_folder, 'x64')):
+               make_symlink(os.path.join(kh15_folder, 'x64'), os.path.join(refined_folder, 'x64'), True)
+            if os.path.exists(os.path.join(refined_folder, 'Keystone.Net.dll')):
+               make_symlink(os.path.join(kh15_folder, 'Keystone.Net.dll'), os.path.join(refined_folder, 'Keystone.Net.dll'), False)
+            if os.path.exists(os.path.join(refined_folder, 'Newtonsoft.Json.dll')):
+               make_symlink(os.path.join(kh15_folder, 'Newtonsoft.Json.dll'), os.path.join(refined_folder, 'Keystone.Net.dll'), False)
             if kh2launch is not None:
                make_symlink(kh2launch, os.path.join(refined_folder, 'KINGDOM HEARTS II FINAL MIX.exe'), False)
             if (refined_ini := settings['mods'].get('refined_config')) is not None:
@@ -337,62 +342,71 @@ def main():
          else:
             del mod_changes['kh2']['KH2FM-Mods-Num/GoA-ROM-Edition']
 
+      rebuild = set()
       if settings['mods']['update_openkh_mods'] == True:
          if os.path.exists(write_mods_folder):
-            for dir in [os.path.join(dp, f) for dp, dn, _ in os.walk(write_mods_folder) for f in dn]:
-               if os.path.exists(os.path.join(dir, '.git')):
-                  print(f'Checking for updates for mod {os.path.basename(dir)}')
-                  subprocess.run(['git', 'pull', '--recurse-submodules'], cwd=dir, check=True)
+            for game in next(os.walk(write_mods_folder))[1]:
+               for dir in [os.path.join(dp, f) for dp, dn, _ in os.walk(os.path.join(write_mods_folder, game)) for f in dn]:
+                  if os.path.exists(os.path.join(dir, '.git')):
+                     print(f'Checking for updates for mod {os.path.basename(dir)}')
+                     old_hash = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=dir, check=True, stdout=subprocess.PIPE).stdout
+                     subprocess.run(['git', 'pull', '--recurse-submodules'], cwd=dir, check=True)
+                     new_hash = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=dir, check=True, stdout=subprocess.PIPE).stdout
+                     if old_hash != new_hash:
+                        rebuild.add(game)
       if 'last_build' not in settings:
          settings['last_build'] = {}
+      enabled_mods = {}
       if kh15_folder is not None:
          for gameid, txtid in [('kh1', 'KH1'), ('kh2', 'KH2'), ('bbs', 'BBS'), ('Recom', 'ReCoM')]:
             enabled_mods_path = os.path.join(openkh_folder, f'mods-{txtid}.txt')
             if os.path.exists(enabled_mods_path):
                with open(enabled_mods_path, 'r') as enabled_file:
-                  enabled_mods = [line.rstrip('\n') for line in enabled_file]
+                  enabled_mods[gameid] = (enabled_mods_path, [line.rstrip('\n') for line in enabled_file])
             else:
-               enabled_mods = []
+               enabled_mods[gameid] = (enabled_mods_path, [])
             if gameid in mod_changes:
                for mod,enabled in mod_changes[gameid].items():
                   if enabled and mod not in enabled_mods:
                      print(f'Enabling {gameid} mod {mod}')
-                     enabled_mods.append(mod)
+                     enabled_mods[gameid][1].append(mod)
                   elif not enabled and mod in enabled_mods:
                      print(f'Disabling {gameid} mod {mod}')
-                     enabled_mods.remove(mod)
+                     enabled_mods[gameid][1].remove(mod)
             last_build = settings['last_build'].get(gameid, [])
-            if enabled_mods != last_build:
+            if enabled_mods[gameid][1] != last_build:
+               rebuild.add(gameid)
                with open(enabled_mods_path, 'w') as enabled_file:
-                  for line in enabled_mods:
+                  for line in enabled_mods[gameid][1]:
                      enabled_file.write(line + '\n')
-               data_folder = os.path.join(openkh_folder, 'data', gameid)
+         for gameid in rebuild:      
+            data_folder = os.path.join(openkh_folder, 'data', gameid)
+            source_folder = os.path.join(kh15_folder, 'Image/en')
+            restore_kh15()
+            if not os.path.exists(data_folder):
+               print(f'Extracting {gameid} data (this will take some time)')
+               for file in os.listdir(source_folder):
+                  if file.startswith(f'{gameid}_') and os.path.splitext(file)[1] == '.hed':
+                     run_program([os.path.join(openkh_folder, 'OpenKh.Command.IdxImg.exe'), 'hed', 'extract', '-n', '-o', convert_path(data_folder), convert_path(os.path.join(source_folder, file))])
+               for file in os.listdir(os.path.join(data_folder, 'original')):
+                  shutil.move(os.path.join(data_folder, 'original', file), data_folder)
+            print(f'Building {gameid} mods')
+            run_program([os.path.join(openkh_folder, 'OpenKh.Command.Patcher.exe'), 'build', '-g', gameid, '-o', convert_path(os.path.join(built_mods_folder, gameid)), '-e', convert_path(enabled_mods[gameid][0]), '-f', convert_path(os.path.join(write_mods_folder, gameid)), '-d', convert_path(data_folder)])
+            patch_folder = os.path.join(openkh_folder, 'patched')
+            if settings['mods'].get('panacea') != True:
+               backup_folder = os.path.join(kh15_folder, 'BackupImage')
                source_folder = os.path.join(kh15_folder, 'Image/en')
-               restore_kh15()
-               if not os.path.exists(data_folder):
-                  print(f'Extracting {gameid} data (this will take some time)')
-                  for file in os.listdir(source_folder):
-                     if file.startswith(f'{gameid}_') and os.path.splitext(file)[1] == '.hed':
-                        run_program([os.path.join(openkh_folder, 'OpenKh.Command.IdxImg.exe'), 'hed', 'extract', '-n', '-o', convert_path(data_folder), convert_path(os.path.join(source_folder, file))])
-                  for file in os.listdir(os.path.join(data_folder, 'original')):
-                     shutil.move(os.path.join(data_folder, 'original', file), data_folder)
-               print(f'Building {gameid} mods')
-               run_program([os.path.join(openkh_folder, 'OpenKh.Command.Patcher.exe'), 'build', '-g', gameid, '-o', convert_path(os.path.join(built_mods_folder, gameid)), '-e', convert_path(enabled_mods_path), '-f', convert_path(os.path.join(write_mods_folder, gameid)), '-d', convert_path(data_folder)])
-               patch_folder = os.path.join(openkh_folder, 'patched')
-               if settings['mods'].get('panacea') != True:
-                  backup_folder = os.path.join(kh15_folder, 'BackupImage')
-                  source_folder = os.path.join(kh15_folder, 'Image/en')
-                  print(f'Patching {gameid} mods')
-                  run_program([os.path.join(openkh_folder, 'OpenKh.Command.Patcher.exe'), 'patch', '-b', convert_path(os.path.join(built_mods_folder, gameid)), '-o', convert_path(patch_folder), '-f', convert_path(source_folder)])
-                  os.makedirs(backup_folder, exist_ok=True)
-                  for file in os.listdir(patch_folder):
-                     backup_path = os.path.join(backup_folder, file)
-                     write_path = os.path.join(source_folder, file)
-                     if not os.path.exists(backup_path):
-                        shutil.copyfile(write_path, backup_path)
-                     shutil.copyfile(os.path.join(patch_folder, file), write_path)
-                  shutil.rmtree(patch_folder)
-               settings['last_build'][gameid] = enabled_mods
+               print(f'Patching {gameid} mods')
+               run_program([os.path.join(openkh_folder, 'OpenKh.Command.Patcher.exe'), 'patch', '-b', convert_path(os.path.join(built_mods_folder, gameid)), '-o', convert_path(patch_folder), '-f', convert_path(source_folder)])
+               os.makedirs(backup_folder, exist_ok=True)
+               for file in os.listdir(patch_folder):
+                  backup_path = os.path.join(backup_folder, file)
+                  write_path = os.path.join(source_folder, file)
+                  if not os.path.exists(backup_path):
+                     shutil.copyfile(write_path, backup_path)
+                  shutil.copyfile(os.path.join(patch_folder, file), write_path)
+               shutil.rmtree(patch_folder)
+            settings['last_build'][gameid] = enabled_mods[gameid][1]
    else:
       restore_kh15()
    
