@@ -68,16 +68,16 @@ def main():
          if exe is None:
             return
          os.makedirs(os.path.dirname(path), exist_ok=True)
-         vars = [f'WINEPREFIX="{wineprefix}"','WINEFSYNC=1','WINE_FULLSCREEN_FSR=1','WINEDEBUG=-all']
+         env_vars = [f'WINEPREFIX="{wineprefix}"','WINEFSYNC=1','WINE_FULLSCREEN_FSR=1','WINEDEBUG=-all']
          dlls = []
          if has_panacea and settings['mods'].get('panacea') == True:
             dlls.append('version=n,b')
          if has_luabackend and settings['mods'].get('luabackend') is not None:
             dlls.append('dinput8=n,b')
          if len(dlls) > 0:
-            vars.append(f'WINEDLLOVERRIDES="{";".join(dlls)}"')
-         with open(path, 'w') as sh_file:
-            sh_file.write(f'#!/bin/sh\ncd "{folder}" || exit 1\n{" ".join(vars)} "{runner_wine}" "{exe}"\n')
+            env_vars.append(f'WINEDLLOVERRIDES="{";".join(dlls)}"')
+         with open(path, 'w', encoding='utf-8') as sh_file:
+            sh_file.write(f'#!/bin/sh\ncd "{folder}" || exit 1\n{" ".join(env_vars)} "{runner_wine}" "{exe}"\n')
          st = os.stat(path)
          os.chmod(path, st.st_mode | stat.S_IEXEC)
       convert_path = path_conv_linux
@@ -93,7 +93,7 @@ def main():
          subprocess.run(['wineboot'], env=dict(os.environ, WINEPREFIX=wineprefix), check=True)
       winetricks = []
       if os.path.exists(os.path.join(wineprefix, 'winetricks.log')):
-         with open(os.path.join(wineprefix, 'winetricks.log'), 'r') as winetricks_file:
+         with open(os.path.join(wineprefix, 'winetricks.log'), 'r', encoding='utf-8') as winetricks_file:
             winetricks = [line.rstrip('\n') for line in winetricks_file]
       if settings['mods'].get('refined') is not None and 'dotnet48' not in winetricks:
          print('Installing dotnet to wineprefix (this will take some time)')
@@ -149,6 +149,7 @@ def main():
          os.rename(epic_folder, os.path.join(kh15_folder, 'EPIC.bak'))
       remove_symlinks.add(os.path.join(kh15_folder, 'x64'))
       remove_symlinks.add(os.path.join(kh15_folder, 'Keystone.Net.dll'))
+      remove_symlinks.add(os.path.join(kh15_folder, 'keystone.dll'))
       remove_symlinks.add(os.path.join(kh15_folder, 'Newtonsoft.Json.dll'))
       if kh2launch is not None:
          remove_symlinks.add(kh2launch)
@@ -160,19 +161,19 @@ def main():
       remove_symlinks.add(os.path.join(kh15_folder, 'panacea_settings.txt'))
       remove_symlinks.add(os.path.join(kh15_folder, 'lua54.dll'))
       remove_symlinks.add(os.path.join(kh15_folder, 'LuaBackend.toml'))
-      remove_symlinks.add(os.path.join(kh15_folder, "avcodec-vgmstream-59.dll"))
-      remove_symlinks.add(os.path.join(kh15_folder, "avformat-vgmstream-59.dll"))
-      remove_symlinks.add(os.path.join(kh15_folder, "avutil-vgmstream-57.dll"))
-      remove_symlinks.add(os.path.join(kh15_folder, "bass.dll"))
-      remove_symlinks.add(os.path.join(kh15_folder, "bass_vgmstream.dll"))
-      remove_symlinks.add(os.path.join(kh15_folder, "libatrac9.dll"))
-      remove_symlinks.add(os.path.join(kh15_folder, "libcelt-0061.dll"))
-      remove_symlinks.add(os.path.join(kh15_folder, "libcelt-0110.dll"))
-      remove_symlinks.add(os.path.join(kh15_folder, "libg719_decode.dll"))
-      remove_symlinks.add(os.path.join(kh15_folder, "libmpg123-0.dll"))
-      remove_symlinks.add(os.path.join(kh15_folder, "libspeex-1.dll"))
-      remove_symlinks.add(os.path.join(kh15_folder, "libvorbis.dll"))
-      remove_symlinks.add(os.path.join(kh15_folder, "swresample-vgmstream-4.dll"))
+      remove_symlinks.add(os.path.join(kh15_folder, 'dependencies/avcodec-vgmstream-59.dll'))
+      remove_symlinks.add(os.path.join(kh15_folder, 'dependencies/avformat-vgmstream-59.dll'))
+      remove_symlinks.add(os.path.join(kh15_folder, 'dependencies/avutil-vgmstream-57.dll'))
+      remove_symlinks.add(os.path.join(kh15_folder, 'dependencies/bass.dll'))
+      remove_symlinks.add(os.path.join(kh15_folder, 'dependencies/bass_vgmstream.dll'))
+      remove_symlinks.add(os.path.join(kh15_folder, 'dependencies/libatrac9.dll'))
+      remove_symlinks.add(os.path.join(kh15_folder, 'dependencies/libcelt-0061.dll'))
+      remove_symlinks.add(os.path.join(kh15_folder, 'dependencies/libcelt-0110.dll'))
+      remove_symlinks.add(os.path.join(kh15_folder, 'dependencies/libg719_decode.dll'))
+      remove_symlinks.add(os.path.join(kh15_folder, 'dependencies/libmpg123-0.dll'))
+      remove_symlinks.add(os.path.join(kh15_folder, 'dependencies/libspeex-1.dll'))
+      remove_symlinks.add(os.path.join(kh15_folder, 'dependencies/libvorbis.dll'))
+      remove_symlinks.add(os.path.join(kh15_folder, 'dependencies/swresample-vgmstream-4.dll'))
    
    if kh28_folder is not None:
       epic_folder = os.path.join(kh28_folder, 'EPIC')
@@ -210,30 +211,30 @@ def main():
          downloaded = False
       if downloaded and not os.path.exists(mods_manager):
          print('Creating default OpenKH mod manager configuration')
-         with open(mods_manager, 'w') as mods_file:
+         with open(mods_manager, 'w', encoding='utf-8') as mods_file:
             yaml.dump({"gameEdition":2}, mods_file)
          if pana_write is not None and not os.path.exists(pana_write):
             print('Creating default panacea configuration')
-            with open(pana_write, 'w') as pana_file:
+            with open(pana_write, 'w', encoding='utf-8') as pana_file:
                pana_file.write('show_console=False')
       if settings['mods'].get('panacea') == True and kh15_folder is not None:
          if is_linux:
             make_symlink(os.path.join(kh15_folder, 'version.dll'), os.path.join(openkh_folder, 'OpenKH.Panacea.dll'), False)
          else:
             make_symlink(os.path.join(kh15_folder, 'DBGHELP.dll'), os.path.join(openkh_folder, 'OpenKH.Panacea.dll'), False)
-         make_symlink(os.path.join(kh15_folder, "avcodec-vgmstream-59.dll"), os.path.join(openkh_folder, "avcodec-vgmstream-59.dll"), False)
-         make_symlink(os.path.join(kh15_folder, "avformat-vgmstream-59.dll"), os.path.join(openkh_folder, "avformat-vgmstream-59.dll"), False)
-         make_symlink(os.path.join(kh15_folder, "avutil-vgmstream-57.dll"), os.path.join(openkh_folder, "avutil-vgmstream-57.dll"), False)
-         make_symlink(os.path.join(kh15_folder, "bass.dll"), os.path.join(openkh_folder, "bass.dll"), False)
-         make_symlink(os.path.join(kh15_folder, "bass_vgmstream.dll"), os.path.join(openkh_folder, "bass_vgmstream.dll"), False)
-         make_symlink(os.path.join(kh15_folder, "libatrac9.dll"), os.path.join(openkh_folder, "libatrac9.dll"), False)
-         make_symlink(os.path.join(kh15_folder, "libcelt-0061.dll"), os.path.join(openkh_folder, "libcelt-0061.dll"), False)
-         make_symlink(os.path.join(kh15_folder, "libcelt-0110.dll"), os.path.join(openkh_folder, "libcelt-0110.dll"), False)
-         make_symlink(os.path.join(kh15_folder, "libg719_decode.dll"), os.path.join(openkh_folder, "libg719_decode.dll"), False)
-         make_symlink(os.path.join(kh15_folder, "libmpg123-0.dll"), os.path.join(openkh_folder, "libmpg123-0.dll"), False)
-         make_symlink(os.path.join(kh15_folder, "libspeex-1.dll"), os.path.join(openkh_folder, "libspeex-1.dll"), False)
-         make_symlink(os.path.join(kh15_folder, "libvorbis.dll"), os.path.join(openkh_folder, "libvorbis.dll"), False)
-         make_symlink(os.path.join(kh15_folder, "swresample-vgmstream-4.dll"), os.path.join(openkh_folder, "swresample-vgmstream-4.dll"), False)
+         make_symlink(os.path.join(kh15_folder, 'dependencies/avcodec-vgmstream-59.dll'), os.path.join(openkh_folder, 'avcodec-vgmstream-59.dll'), False)
+         make_symlink(os.path.join(kh15_folder, 'dependencies/avformat-vgmstream-59.dll'), os.path.join(openkh_folder, 'avformat-vgmstream-59.dll'), False)
+         make_symlink(os.path.join(kh15_folder, 'dependencies/avutil-vgmstream-57.dll'), os.path.join(openkh_folder, 'avutil-vgmstream-57.dll'), False)
+         make_symlink(os.path.join(kh15_folder, 'dependencies/bass.dll'), os.path.join(openkh_folder, 'bass.dll'), False)
+         make_symlink(os.path.join(kh15_folder, 'dependencies/bass_vgmstream.dll'), os.path.join(openkh_folder, 'bass_vgmstream.dll'), False)
+         make_symlink(os.path.join(kh15_folder, 'dependencies/libatrac9.dll'), os.path.join(openkh_folder, 'libatrac9.dll'), False)
+         make_symlink(os.path.join(kh15_folder, 'dependencies/libcelt-0061.dll'), os.path.join(openkh_folder, 'libcelt-0061.dll'), False)
+         make_symlink(os.path.join(kh15_folder, 'dependencies/libcelt-0110.dll'), os.path.join(openkh_folder, 'libcelt-0110.dll'), False)
+         make_symlink(os.path.join(kh15_folder, 'dependencies/libg719_decode.dll'), os.path.join(openkh_folder, 'libg719_decode.dll'), False)
+         make_symlink(os.path.join(kh15_folder, 'dependencies/libmpg123-0.dll'), os.path.join(openkh_folder, 'libmpg123-0.dll'), False)
+         make_symlink(os.path.join(kh15_folder, 'dependencies/libspeex-1.dll'), os.path.join(openkh_folder, 'libspeex-1.dll'), False)
+         make_symlink(os.path.join(kh15_folder, 'dependencies/libvorbis.dll'), os.path.join(openkh_folder, 'libvorbis.dll'), False)
+         make_symlink(os.path.join(kh15_folder, 'dependencies/swresample-vgmstream-4.dll'), os.path.join(openkh_folder, 'swresample-vgmstream-4.dll'), False)
          if pana_settings is not None:
             make_symlink(os.path.join(kh15_folder, 'panacea_settings.txt'), pana_settings, False)
       built_mods_folder = os.path.join(openkh_folder, 'mod')
@@ -241,7 +242,7 @@ def main():
          windows_folder = convert_path(built_mods_folder)
          changes = False
          found = False
-         with open(pana_write, 'r') as pana_file:
+         with open(pana_write, 'r', encoding='utf-8') as pana_file:
             lines = [line.rstrip('\n') for line in pana_file]
          for i in range(len(lines)):
             line = lines[i]
@@ -256,8 +257,8 @@ def main():
             lines.append(f'mod_path={windows_folder}')
             changes = True
          if changes:
-            print(f'Updating Panacea mods location')
-            with open(pana_write, 'w') as pana_file:
+            print('Updating Panacea mods location')
+            with open(pana_write, 'w', encoding='utf-8') as pana_file:
                for line in lines:
                   pana_file.write(line + '\n')
 
@@ -275,7 +276,7 @@ def main():
          make_symlink(os.path.join(openkh_folder, 'mods-ReCoM.txt'), os.path.join(custom_mods_folder, 'Recom.txt'), False)
       if os.path.exists(mods_manager) and kh15_folder is not None:
          changes = False
-         with open(mods_manager, 'r') as mods_file:
+         with open(mods_manager, 'r', encoding='utf-8') as mods_file:
             mods_data = yaml.safe_load(mods_file)
          pc_release = convert_path(kh15_folder)
          if mods_data.get('pcReleaseLocation') != pc_release:
@@ -288,7 +289,7 @@ def main():
             mods_data['panaceaInstalled'] = panacea
             changes = True
          if changes:
-            with open(mods_manager, 'w') as mods_file:
+            with open(mods_manager, 'w', encoding='utf-8') as mods_file:
                yaml.dump(mods_data, mods_file, sort_keys=False)
 
       def download_mod(game, repo):
@@ -326,6 +327,8 @@ def main():
                make_symlink(os.path.join(kh15_folder, 'x64'), os.path.join(refined_folder, 'x64'), True)
             if os.path.exists(os.path.join(refined_folder, 'Keystone.Net.dll')):
                make_symlink(os.path.join(kh15_folder, 'Keystone.Net.dll'), os.path.join(refined_folder, 'Keystone.Net.dll'), False)
+            if os.path.exists(os.path.join(refined_folder, 'keystone.dll')):
+               make_symlink(os.path.join(kh15_folder, 'keystone.dll'), os.path.join(refined_folder, 'keystone.dll'), False)
             if os.path.exists(os.path.join(refined_folder, 'Newtonsoft.Json.dll')):
                make_symlink(os.path.join(kh15_folder, 'Newtonsoft.Json.dll'), os.path.join(refined_folder, 'Keystone.Net.dll'), False)
             if kh2launch is not None:
@@ -346,12 +349,12 @@ def main():
       if settings['mods']['update_openkh_mods'] == True:
          if os.path.exists(write_mods_folder):
             for game in next(os.walk(write_mods_folder))[1]:
-               for dir in [os.path.join(dp, f) for dp, dn, _ in os.walk(os.path.join(write_mods_folder, game)) for f in dn]:
-                  if os.path.exists(os.path.join(dir, '.git')):
-                     print(f'Checking for updates for mod {os.path.basename(dir)}')
-                     old_hash = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=dir, check=True, stdout=subprocess.PIPE).stdout
-                     subprocess.run(['git', 'pull', '--recurse-submodules'], cwd=dir, check=True)
-                     new_hash = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=dir, check=True, stdout=subprocess.PIPE).stdout
+               for mod_dir in [os.path.join(dp, f) for dp, dn, _ in os.walk(os.path.join(write_mods_folder, game)) for f in dn]:
+                  if os.path.exists(os.path.join(mod_dir, '.git')):
+                     print(f'Checking for updates for mod {os.path.basename(mod_dir)}')
+                     old_hash = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=mod_dir, check=True, stdout=subprocess.PIPE).stdout
+                     subprocess.run(['git', 'pull', '--recurse-submodules'], cwd=mod_dir, check=True)
+                     new_hash = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=mod_dir, check=True, stdout=subprocess.PIPE).stdout
                      if old_hash != new_hash:
                         rebuild.add(game)
       if 'last_build' not in settings:
@@ -361,7 +364,7 @@ def main():
          for gameid, txtid in [('kh1', 'KH1'), ('kh2', 'KH2'), ('bbs', 'BBS'), ('Recom', 'ReCoM')]:
             enabled_mods_path = os.path.join(openkh_folder, f'mods-{txtid}.txt')
             if os.path.exists(enabled_mods_path):
-               with open(enabled_mods_path, 'r') as enabled_file:
+               with open(enabled_mods_path, 'r', encoding='utf-8') as enabled_file:
                   enabled_mods[gameid] = (enabled_mods_path, [line.rstrip('\n') for line in enabled_file])
             else:
                enabled_mods[gameid] = (enabled_mods_path, [])
@@ -376,7 +379,7 @@ def main():
             last_build = settings['last_build'].get(gameid, [])
             if enabled_mods[gameid][1] != last_build:
                rebuild.add(gameid)
-               with open(enabled_mods_path, 'w') as enabled_file:
+               with open(enabled_mods_path, 'w', encoding='utf-8') as enabled_file:
                   for line in enabled_mods[gameid][1]:
                      enabled_file.write(line + '\n')
          for gameid in rebuild:      
@@ -444,7 +447,7 @@ def main():
             if folder is None:
                continue
             toml_path = os.path.join(folder, 'LuaBackend.toml')
-            with open(toml_path, 'r') as toml_file:
+            with open(toml_path, 'r', encoding='utf-8') as toml_file:
                toml_data = tomlkit.load(toml_file)
             changes = False
             for game in ['kh1', 'kh2', 'bbs', 'recom', 'kh3d']:
@@ -465,7 +468,7 @@ def main():
                      print(f'Adding OpenKH scripts folder \'{path}\' to LuaBackend configuration')
                      toml_data[game]['scripts'].append({'path':windows_path,'relative':False,'openkh':True})
             if changes:
-               with open(toml_user, 'w') as toml_file:
+               with open(toml_user, 'w', encoding='utf-8') as toml_file:
                   tomlkit.dump(toml_data, toml_file)
    
    if kh15_folder is not None and kh2launch is not None:
@@ -496,18 +499,18 @@ def main():
    make_launch('kh3', kh3_folder, False, False)
    make_launch('khmom', khmom_folder, False, False)
 
-   with open(settings_path, 'w') as data_file:
+   with open(settings_path, 'w', encoding='utf-8') as data_file:
       yaml.dump(settings, data_file, sort_keys=False, width=1000)
 
 
-def download_latest(settings, date_key, url, filter, has_extra_folder, destination_folder, is_tar):
+def download_latest(settings, date_key, url, predicate, has_extra_folder, destination_folder, is_tar):
    date = settings['downloads'].get(date_key)
-   rq = requests.get(url)
+   rq = requests.get(url, timeout=10)
    if rq.status_code != 200:
       print(f'Error {rq.status_code}!')
       try:
          print(json.loads(rq.text)['message'])
-      except:
+      except json.JSONDecodeError:
          print(rq.text)
       if not os.path.exists(destination_folder):
          rq.raise_for_status()
@@ -516,22 +519,22 @@ def download_latest(settings, date_key, url, filter, has_extra_folder, destinati
       newest = None
       release = None
       releases = json.loads(rq.text)
-      for next in releases:
-         release_time = datetime.datetime.fromisoformat(next['published_at'])
+      for next_release in releases:
+         release_time = datetime.datetime.fromisoformat(next_release['published_at'])
          if newest is None or release_time > newest:
             newest = release_time
-            release = next
+            release = next_release
       if release is None:
          return False
    else:
       release = json.loads(rq.text)
    for asset in release['assets']:
-      if not filter(asset):
+      if not predicate(asset):
          continue
       asset_date = datetime.datetime.fromisoformat(asset['updated_at'])
       if date is None or asset_date > date or not os.path.exists(destination_folder):
          print(f'Downloading update: {release["tag_name"]}')
-         rq = requests.get(asset['browser_download_url'])
+         rq = requests.get(asset['browser_download_url'], timeout=10)
          if rq.status_code != 200:
             print(f'Error {rq.status_code}!')
             print(rq.text)
@@ -542,13 +545,13 @@ def download_latest(settings, date_key, url, filter, has_extra_folder, destinati
          temp_zip = os.path.join(temp_folder, f'{date_key}.zip')
          with open(temp_zip, 'wb') as file:
             file.write(rq.content)
-         with (tarfile.open(temp_zip) if is_tar else zipfile.ZipFile(temp_zip, 'r')) as zip:
+         with (tarfile.open(temp_zip) if is_tar else zipfile.ZipFile(temp_zip, 'r')) as zip_file:
             if has_extra_folder:
                temp_extract = os.path.join(temp_folder, date_key)
-               zip.extractall(temp_extract)
+               zip_file.extractall(temp_extract)
                shutil.copytree(os.path.join(temp_extract, os.listdir(temp_extract)[0]), destination_folder, dirs_exist_ok=True)
             else:
-               zip.extractall(destination_folder)
+               zip_file.extractall(destination_folder)
          shutil.rmtree(temp_folder)
          settings['downloads'][date_key] = asset_date
          return True
@@ -556,7 +559,7 @@ def download_latest(settings, date_key, url, filter, has_extra_folder, destinati
 
 def get_settings(settings_path):
    if os.path.exists(settings_path):
-      with open(settings_path, 'r') as data_file:
+      with open(settings_path, 'r', encoding='utf-8') as data_file:
          settings = yaml.safe_load(data_file)
    else:
       print('First-time run, welcome!')
@@ -716,9 +719,7 @@ def get_settings(settings_path):
          if 'update_openkh_mods' not in settings['mods']:
             settings['mods']['update_openkh_mods'] = True
       if settings['mods']['openkh'] is not None and 'panacea' not in settings['mods']:
-         print('Panacea mod loader: (y/n)')
-         settings['mods']['panacea'] = yes_no()
-         print()
+         settings['mods']['panacea'] = True
       if settings['mods'].get('panacea') == True:
          if 'panacea_settings' not in settings['mods']:
             settings['mods']['panacea_settings'] = os.path.join(base_folder, 'panacea_settings.txt')
@@ -733,7 +734,7 @@ def get_settings(settings_path):
          if 'luabackend_config' not in settings['mods']:
             settings['mods']['luabackend_config'] = os.path.join(base_folder, 'LuaBackend.toml')
 
-   with open(settings_path, 'w') as data_file:
+   with open(settings_path, 'w', encoding='utf-8') as data_file:
       yaml.dump(settings, data_file, sort_keys=False, width=1000)
 
    return (settings, settings != old_settings)
