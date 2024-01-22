@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import requests
 import json
-import zipfile
 import shutil
 import os
 import subprocess
@@ -9,10 +8,10 @@ import datetime
 import tomlkit
 import yaml
 import tempfile
-import tarfile
 import stat
 import copy
 import platform
+import pyunpack
 
 def main():
    settings_path = os.path.join(os.path.dirname(__file__), 'settings.yaml')
@@ -88,7 +87,7 @@ def main():
       runner_wine = os.path.join(runner, 'bin/wine')
       if settings['update_runner'] == True or not os.path.exists(runner):
          print('Checking for runner updates...')
-         download_latest(settings, 'runner', 'https://api.github.com/repos/GloriousEggroll/wine-ge-custom/releases/latest', lambda x: x['name'].endswith('.tar.xz'), True, runner, True)
+         download_latest(settings, 'runner', 'https://api.github.com/repos/GloriousEggroll/wine-ge-custom/releases/latest', lambda x: x['name'].endswith('.tar.xz'), True, runner)
       if not os.path.exists(user_folder):
          subprocess.run(['wineboot'], env=dict(os.environ, WINEPREFIX=wineprefix), check=True)
       winetricks = []
@@ -206,7 +205,7 @@ def main():
          pana_write = os.path.join(kh15_folder, 'panacea_settings.txt')
       if settings['mods']['update_openkh'] == True or not os.path.exists(openkh_folder):
          print('Checking for OpenKH updates...')
-         downloaded = download_latest(settings, 'openkh', 'https://api.github.com/repos/OpenKH/OpenKh/releases/tags/latest', lambda x: x['name'] == 'openkh.zip', True, openkh_folder, False)
+         downloaded = download_latest(settings, 'openkh', 'https://api.github.com/repos/OpenKH/OpenKh/releases/tags/latest', lambda x: x['name'] == 'openkh.zip', True, openkh_folder)
       else:
          downloaded = False
       if downloaded and not os.path.exists(mods_manager):
@@ -309,7 +308,7 @@ def main():
       if (refined_folder := settings['mods'].get('refined')) is not None:
          if settings['mods']['update_refined'] == True or not os.path.exists(refined_folder):
             print('Checking for ReFined updates...')
-            download_latest(settings, 'refined', 'https://api.github.com/repos/TopazTK/KH-ReFined/releases', lambda x: x['name'].endswith('.zip'), False, refined_folder, False)
+            download_latest(settings, 'refined', 'https://api.github.com/repos/KH-ReFined/KH-ReFined/releases', lambda x: x['name'].endswith('.zip') or x['name'].endswith('.rar'), False, refined_folder)
             download_mod('kh2', 'KH-ReFined/KH2-MAIN')
             if settings['mods'].get('refined.vanilla_ost') == True:
                download_mod('kh2', 'KH-ReFined/KH2-VanillaOST')
@@ -340,7 +339,7 @@ def main():
       if (randomizer_folder := settings['mods'].get('randomizer')) is not None:
          if settings['mods']['update_randomizer'] == True or not os.path.exists(randomizer_folder):
             print('Checking for Randomizer updates...')
-            download_latest(settings, 'randomizer', 'https://api.github.com/repos/tommadness/KH2Randomizer/releases/latest', lambda x: x['name'] == 'Kingdom.Hearts.II.Final.Mix.Randomizer.zip', False, randomizer_folder, False)
+            download_latest(settings, 'randomizer', 'https://api.github.com/repos/tommadness/KH2Randomizer/releases/latest', lambda x: x['name'] == 'Kingdom.Hearts.II.Final.Mix.Randomizer.zip', False, randomizer_folder)
             download_mod('kh2', 'KH2FM-Mods-Num/GoA-ROM-Edition')
          else:
             del mod_changes['kh2']['KH2FM-Mods-Num/GoA-ROM-Edition']
@@ -416,7 +415,7 @@ def main():
    if (lua_folder := settings['mods'].get('luabackend')) is not None:
       if settings['mods']['update_luabackend'] == True or not os.path.exists(lua_folder):
          print('Checking for LuaBackend updates...')
-         download_latest(settings, 'luabackend', 'https://api.github.com/repos/Sirius902/LuaBackend/releases/latest', lambda x: x['name'] == 'DBGHELP.zip', False, lua_folder, False)
+         download_latest(settings, 'luabackend', 'https://api.github.com/repos/Sirius902/LuaBackend/releases/latest', lambda x: x['name'] == 'DBGHELP.zip', False, lua_folder)
       toml_user = settings['mods'].get('luabackend_config')
       toml_default = os.path.join(lua_folder, 'LuaBackend.toml')
       if os.path.exists(toml_default):
@@ -503,7 +502,7 @@ def main():
       yaml.dump(settings, data_file, sort_keys=False, width=1000)
 
 
-def download_latest(settings, date_key, url, predicate, has_extra_folder, destination_folder, is_tar):
+def download_latest(settings, date_key, url, predicate, has_extra_folder, destination_folder):
    date = settings['downloads'].get(date_key)
    rq = requests.get(url, timeout=10)
    if rq.status_code != 200:
@@ -545,13 +544,13 @@ def download_latest(settings, date_key, url, predicate, has_extra_folder, destin
          temp_zip = os.path.join(temp_folder, f'{date_key}.zip')
          with open(temp_zip, 'wb') as file:
             file.write(rq.content)
-         with (tarfile.open(temp_zip) if is_tar else zipfile.ZipFile(temp_zip, 'r')) as zip_file:
-            if has_extra_folder:
-               temp_extract = os.path.join(temp_folder, date_key)
-               zip_file.extractall(temp_extract)
-               shutil.copytree(os.path.join(temp_extract, os.listdir(temp_extract)[0]), destination_folder, dirs_exist_ok=True)
-            else:
-               zip_file.extractall(destination_folder)
+         os.makedirs(destination_folder, exist_ok=True)
+         if has_extra_folder:
+            temp_extract = os.path.join(temp_folder, date_key)
+            pyunpack.Archive(temp_zip).extractall(temp_extract)
+            shutil.copytree(os.path.join(temp_extract, os.listdir(temp_extract)[0]), destination_folder, dirs_exist_ok=True)
+         else:
+            pyunpack.Archive(temp_zip).extractall(destination_folder)
          shutil.rmtree(temp_folder)
          settings['downloads'][date_key] = asset_date
          return True
@@ -744,6 +743,7 @@ def yes_no():
       answer = input('> ')
       if answer in ('y','n','Y','N'):
          break
+      print('Type Y for yes, or N for no')
    return answer in ('y','Y')
 
 if __name__ == '__main__':
