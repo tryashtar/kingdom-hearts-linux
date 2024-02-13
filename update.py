@@ -547,6 +547,7 @@ def download_latest(settings, date_key, url, predicate, has_extra_folder, destin
          os.makedirs(destination_folder, exist_ok=True)
          if has_extra_folder:
             temp_extract = os.path.join(temp_folder, date_key)
+            os.makedirs(temp_extract, exist_ok=True)
             pyunpack.Archive(temp_zip).extractall(temp_extract)
             shutil.copytree(os.path.join(temp_extract, os.listdir(temp_extract)[0]), destination_folder, dirs_exist_ok=True)
          else:
