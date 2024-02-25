@@ -110,7 +110,7 @@ def main():
          return path
       def run_program_windows(args):
          return subprocess.run(args, check=True)
-      def make_launch_windows(name, folder, has_panacea, has_luabackend):
+      def make_launch_windows(_name, _folder, _has_panacea, _has_luabackend):
          return
       convert_path = convert_path_windows
       run_program = run_program_windows
@@ -450,22 +450,25 @@ def main():
                toml_data = tomlkit.load(toml_file)
             changes = False
             for game in ['kh1', 'kh2', 'bbs', 'recom', 'kh3d']:
-               if game in toml_data and 'scripts' in toml_data[game]:
-                  path = os.path.join(openkh_folder, 'mod', game, 'scripts') 
-                  windows_path = convert_path(path)
-                  found = False
-                  for script in toml_data[game]['scripts']:
-                     if 'openkh' in script and script['openkh'] == True:
-                        found = True
-                        if script['path'] != windows_path:
-                           script['path'] = windows_path
-                           print(f'Adding OpenKH scripts folder \'{path}\' to LuaBackend configuration')
-                           changes = True
-                        break
-                  if not found:
-                     changes = True
-                     print(f'Adding OpenKH scripts folder \'{path}\' to LuaBackend configuration')
-                     toml_data[game]['scripts'].append({'path':windows_path,'relative':False,'openkh':True})
+               gamedata = toml_data.get(game)
+               if gamedata is not None:
+                  scripts = gamedata.get('scripts')
+                  if scripts is not None:
+                     path = os.path.join(openkh_folder, 'mod', game, 'scripts') 
+                     windows_path = convert_path(path)
+                     found = False
+                     for script in scripts:
+                        if 'openkh' in script and script['openkh'] == True:
+                           found = True
+                           if script['path'] != windows_path:
+                              script['path'] = windows_path
+                              print(f'Adding OpenKH scripts folder \'{path}\' to LuaBackend configuration')
+                              changes = True
+                           break
+                     if not found:
+                        changes = True
+                        print(f'Adding OpenKH scripts folder \'{path}\' to LuaBackend configuration')
+                        scripts.append({'path':windows_path,'relative':False,'openkh':True})
             if changes:
                with open(toml_user, 'w', encoding='utf-8') as toml_file:
                   tomlkit.dump(toml_data, toml_file)
