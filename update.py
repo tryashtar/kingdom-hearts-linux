@@ -183,12 +183,11 @@ def main():
       remove_symlinks.add(os.path.join(kh28_folder, 'DBGHELP.dll'))
       remove_symlinks.add(os.path.join(kh28_folder, 'lua54.dll'))
       remove_symlinks.add(os.path.join(kh28_folder, 'LuaBackend.toml'))
+      remove_symlinks.add(os.path.join(kh28_folder, 'panacea_settings.txt'))
 
-   def restore_kh15():
-      if kh15_folder is None:
-         return
-      backup_folder = os.path.join(kh15_folder, 'BackupImage')
-      source_folder = os.path.join(kh15_folder, 'Image/en')
+   def restore_folder(kh_folder):
+      backup_folder = os.path.join(kh_folder, 'BackupImage')
+      source_folder = os.path.join(kh_folder, 'Image/en')
       if os.path.exists(backup_folder):
          for file in os.listdir(backup_folder):
             shutil.copyfile(os.path.join(backup_folder, file), os.path.join(source_folder, file))
@@ -200,9 +199,6 @@ def main():
       write_mods_folder = custom_mods_folder if custom_mods_folder is not None else default_mods_folder
       mods_manager = os.path.join(openkh_folder, 'mods-manager.yml')
       pana_settings = settings['mods'].get('panacea_settings')
-      pana_write = pana_settings
-      if pana_settings is None and kh15_folder is not None:
-         pana_write = os.path.join(kh15_folder, 'panacea_settings.txt')
       if settings['mods']['update_openkh'] == True or not os.path.exists(openkh_folder):
          print('Checking for OpenKH updates...')
          downloaded = download_latest(settings, 'openkh', 'https://api.github.com/repos/OpenKH/OpenKh/releases/tags/latest', lambda x: x['name'] == 'openkh.zip', True, openkh_folder)
@@ -212,15 +208,16 @@ def main():
          print('Creating default OpenKH mod manager configuration')
          with open(mods_manager, 'w', encoding='utf-8') as mods_file:
             yaml.dump({"gameEdition":2}, mods_file)
-         if pana_write is not None and not os.path.exists(pana_write):
+         if pana_settings is not None and not os.path.exists(pana_settings):
             print('Creating default panacea configuration')
-            with open(pana_write, 'w', encoding='utf-8') as pana_file:
+            with open(pana_settings, 'w', encoding='utf-8') as pana_file:
                pana_file.write('show_console=False')
-      if settings['mods'].get('panacea') == True and kh15_folder is not None:
-         if is_linux:
-            make_symlink(os.path.join(kh15_folder, 'version.dll'), os.path.join(openkh_folder, 'OpenKH.Panacea.dll'), False)
-         else:
-            make_symlink(os.path.join(kh15_folder, 'DBGHELP.dll'), os.path.join(openkh_folder, 'OpenKH.Panacea.dll'), False)
+      if kh15_folder is not None:
+         if settings['mods'].get('panacea') == True:
+            if is_linux:
+               make_symlink(os.path.join(kh15_folder, 'version.dll'), os.path.join(openkh_folder, 'OpenKH.Panacea.dll'), False)
+            else:
+               make_symlink(os.path.join(kh15_folder, 'DBGHELP.dll'), os.path.join(openkh_folder, 'OpenKH.Panacea.dll'), False)
          make_symlink(os.path.join(kh15_folder, 'dependencies/avcodec-vgmstream-59.dll'), os.path.join(openkh_folder, 'avcodec-vgmstream-59.dll'), False)
          make_symlink(os.path.join(kh15_folder, 'dependencies/avformat-vgmstream-59.dll'), os.path.join(openkh_folder, 'avformat-vgmstream-59.dll'), False)
          make_symlink(os.path.join(kh15_folder, 'dependencies/avutil-vgmstream-57.dll'), os.path.join(openkh_folder, 'avutil-vgmstream-57.dll'), False)
@@ -236,12 +233,20 @@ def main():
          make_symlink(os.path.join(kh15_folder, 'dependencies/swresample-vgmstream-4.dll'), os.path.join(openkh_folder, 'swresample-vgmstream-4.dll'), False)
          if pana_settings is not None:
             make_symlink(os.path.join(kh15_folder, 'panacea_settings.txt'), pana_settings, False)
+      if kh28_folder is not None:
+         if settings['mods'].get('panacea') == True:
+            if is_linux:
+               make_symlink(os.path.join(kh28_folder, 'version.dll'), os.path.join(openkh_folder, 'OpenKH.Panacea.dll'), False)
+            else:
+               make_symlink(os.path.join(kh28_folder, 'DBGHELP.dll'), os.path.join(openkh_folder, 'OpenKH.Panacea.dll'), False)
+         if pana_settings is not None:
+            make_symlink(os.path.join(kh28_folder, 'panacea_settings.txt'), pana_settings, False)
       built_mods_folder = os.path.join(openkh_folder, 'mod')
-      if os.path.exists(pana_write):
+      if os.path.exists(pana_settings):
          windows_folder = convert_path(built_mods_folder)
          changes = False
          found = False
-         with open(pana_write, 'r', encoding='utf-8') as pana_file:
+         with open(pana_settings, 'r', encoding='utf-8') as pana_file:
             lines = [line.rstrip('\n') for line in pana_file]
          for i in range(len(lines)):
             line = lines[i]
@@ -257,7 +262,7 @@ def main():
             changes = True
          if changes:
             print('Updating Panacea mods location')
-            with open(pana_write, 'w', encoding='utf-8') as pana_file:
+            with open(pana_settings, 'w', encoding='utf-8') as pana_file:
                for line in lines:
                   pana_file.write(line + '\n')
 
@@ -266,6 +271,7 @@ def main():
       remove_symlinks.add(os.path.join(openkh_folder, 'mods-KH2.txt'))
       remove_symlinks.add(os.path.join(openkh_folder, 'mods-BBS.txt'))
       remove_symlinks.add(os.path.join(openkh_folder, 'mods-ReCoM.txt'))
+      remove_symlinks.add(os.path.join(openkh_folder, 'mods-KH3D.txt'))
       if custom_mods_folder is not None:
          os.makedirs(custom_mods_folder, exist_ok=True)
          make_symlink(default_mods_folder, custom_mods_folder, True)
@@ -273,15 +279,23 @@ def main():
          make_symlink(os.path.join(openkh_folder, 'mods-KH2.txt'), os.path.join(custom_mods_folder, 'kh2.txt'), False)
          make_symlink(os.path.join(openkh_folder, 'mods-BBS.txt'), os.path.join(custom_mods_folder, 'bbs.txt'), False)
          make_symlink(os.path.join(openkh_folder, 'mods-ReCoM.txt'), os.path.join(custom_mods_folder, 'Recom.txt'), False)
-      if os.path.exists(mods_manager) and kh15_folder is not None:
+         make_symlink(os.path.join(openkh_folder, 'mods-KH3D.txt'), os.path.join(custom_mods_folder, 'kh3d.txt'), False)
+      if os.path.exists(mods_manager):
          changes = False
          with open(mods_manager, 'r', encoding='utf-8') as mods_file:
             mods_data = yaml.safe_load(mods_file)
-         pc_release = convert_path(kh15_folder)
-         if mods_data.get('pcReleaseLocation') != pc_release:
-            print('Updating KH 1.5 install location in OpenKH mod manager')
-            mods_data['pcReleaseLocation'] = pc_release
-            changes = True
+         if kh15_folder is not None:
+            pc_release = convert_path(kh15_folder)
+            if mods_data.get('pcReleaseLocation') != pc_release:
+               print('Updating KH 1.5 install location in OpenKH mod manager')
+               mods_data['pcReleaseLocation'] = pc_release
+               changes = True
+         if kh28_folder is not None:
+            pc_release = convert_path(kh28_folder)
+            if mods_data.get('pcReleaseLocationKH3D') != pc_release:
+               print('Updating KH 2.8 install location in OpenKH mod manager')
+               mods_data['pcReleaseLocationKH3D'] = pc_release
+               changes = True
          panacea = settings['mods'].get('panacea') == True
          if mods_data.get('panaceaInstalled') != panacea:
             print('Updating panacea install status in OpenKH mod manager')
@@ -359,8 +373,9 @@ def main():
       if 'last_build' not in settings:
          settings['last_build'] = {}
       enabled_mods = {}
-      if kh15_folder is not None:
-         for gameid, txtid in [('kh1', 'KH1'), ('kh2', 'KH2'), ('bbs', 'BBS'), ('Recom', 'ReCoM')]:
+
+      def handle_games(kh_folder, ids):
+         for gameid, txtid in ids:
             enabled_mods_path = os.path.join(openkh_folder, f'mods-{txtid}.txt')
             if os.path.exists(enabled_mods_path):
                with open(enabled_mods_path, 'r', encoding='utf-8') as enabled_file:
@@ -383,8 +398,8 @@ def main():
                      enabled_file.write(line + '\n')
          for gameid in rebuild:      
             data_folder = os.path.join(openkh_folder, 'data', gameid)
-            source_folder = os.path.join(kh15_folder, 'Image/en')
-            restore_kh15()
+            source_folder = os.path.join(kh_folder, 'Image/en')
+            restore_folder(kh_folder)
             if not os.path.exists(data_folder):
                print(f'Extracting {gameid} data (this will take some time)')
                for file in os.listdir(source_folder):
@@ -396,8 +411,8 @@ def main():
             run_program([os.path.join(openkh_folder, 'OpenKh.Command.Patcher.exe'), 'build', '-g', gameid, '-o', convert_path(os.path.join(built_mods_folder, gameid)), '-e', convert_path(enabled_mods[gameid][0]), '-f', convert_path(os.path.join(write_mods_folder, gameid)), '-d', convert_path(data_folder)])
             patch_folder = os.path.join(openkh_folder, 'patched')
             if settings['mods'].get('panacea') != True:
-               backup_folder = os.path.join(kh15_folder, 'BackupImage')
-               source_folder = os.path.join(kh15_folder, 'Image/en')
+               backup_folder = os.path.join(kh_folder, 'BackupImage')
+               source_folder = os.path.join(kh_folder, 'Image/en')
                print(f'Patching {gameid} mods')
                run_program([os.path.join(openkh_folder, 'OpenKh.Command.Patcher.exe'), 'patch', '-b', convert_path(os.path.join(built_mods_folder, gameid)), '-o', convert_path(patch_folder), '-f', convert_path(source_folder)])
                os.makedirs(backup_folder, exist_ok=True)
@@ -409,8 +424,17 @@ def main():
                   shutil.copyfile(os.path.join(patch_folder, file), write_path)
                shutil.rmtree(patch_folder)
             settings['last_build'][gameid] = enabled_mods[gameid][1]
+      
+      if kh15_folder is not None:
+         handle_games(kh15_folder, [('kh1', 'KH1'), ('kh2', 'KH2'), ('bbs', 'BBS'), ('Recom', 'ReCoM')])
+      if kh28_folder is not None:
+         handle_games(kh28_folder, [('kh3d', 'KH3D')])
+
    else:
-      restore_kh15()
+      if kh15_folder is not None:
+         restore_folder(kh15_folder)
+      if kh28_folder is not None:
+         restore_folder(kh28_folder)
    
    if (lua_folder := settings['mods'].get('luabackend')) is not None:
       if settings['mods']['update_luabackend'] == True or not os.path.exists(lua_folder):
@@ -712,6 +736,7 @@ def get_settings(settings_path):
             settings['mods']['luabackend'] = os.path.join(base_folder, 'LuaBackend')
          if 'luabackend_config' not in settings['mods']:
             settings['mods']['luabackend_config'] = os.path.join(base_folder, 'LuaBackend.toml')
+   if settings['installs']['kh1.5+2.5'] is not None or settings['installs']['kh2.8'] is not None:
       if 'openkh' not in settings['mods']:
          print('OpenKh mod manager: (y/n)')
          settings['mods']['openkh'] = os.path.join(base_folder, 'OpenKH') if yes_no() else None
@@ -726,7 +751,6 @@ def get_settings(settings_path):
       if settings['mods'].get('panacea') == True:
          if 'panacea_settings' not in settings['mods']:
             settings['mods']['panacea_settings'] = os.path.join(base_folder, 'panacea_settings.txt')
-   if settings['installs']['kh1.5+2.5'] is not None or settings['installs']['kh2.8'] is not None:
       if 'luabackend' not in settings['mods']:
          print('LuaBackend script loader: (y/n)')
          settings['mods']['luabackend'] = os.path.join(base_folder, 'LuaBackend') if yes_no() else None
