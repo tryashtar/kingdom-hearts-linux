@@ -408,13 +408,13 @@ def main():
                for file in os.listdir(os.path.join(data_folder, 'original')):
                   shutil.move(os.path.join(data_folder, 'original', file), data_folder)
             print(f'Building {gameid} mods')
-            run_program([os.path.join(openkh_folder, 'OpenKh.Command.Patcher.exe'), 'build', '-g', gameid, '-o', convert_path(os.path.join(built_mods_folder, gameid)), '-e', convert_path(enabled_mods[gameid][0]), '-f', convert_path(os.path.join(write_mods_folder, gameid)), '-d', convert_path(data_folder)])
+            run_program([os.path.join(openkh_folder, 'OpenKh.Command.IdxImg.exe'), 'hed', 'build', '-g', gameid, '-o', convert_path(os.path.join(built_mods_folder, gameid)), '-e', convert_path(enabled_mods[gameid][0]), '-f', convert_path(os.path.join(write_mods_folder, gameid)), '-d', convert_path(data_folder)])
             patch_folder = os.path.join(openkh_folder, 'patched')
             if settings['mods'].get('panacea') != True:
                backup_folder = os.path.join(kh_folder, 'BackupImage')
                source_folder = os.path.join(kh_folder, 'Image/en')
                print(f'Patching {gameid} mods')
-               run_program([os.path.join(openkh_folder, 'OpenKh.Command.Patcher.exe'), 'patch', '-b', convert_path(os.path.join(built_mods_folder, gameid)), '-o', convert_path(patch_folder), '-f', convert_path(source_folder)])
+               run_program([os.path.join(openkh_folder, 'OpenKh.Command.IdxImg.exe'), 'hed', 'full-patch', '-b', convert_path(os.path.join(built_mods_folder, gameid)), '-o', convert_path(patch_folder), '-f', convert_path(source_folder)])
                os.makedirs(backup_folder, exist_ok=True)
                for file in os.listdir(patch_folder):
                   backup_path = os.path.join(backup_folder, file)
@@ -769,10 +769,11 @@ def get_settings(settings_path):
 def yes_no():
    while True:
       answer = input('> ')
-      if answer in ('y','n','Y','N'):
-         break
+      if answer in ('y','Y'):
+         return True
+      if answer in ('n','N'):
+         return False
       print('Type Y for yes, or N for no')
-   return answer in ('y','Y')
 
 if __name__ == '__main__':
    main()

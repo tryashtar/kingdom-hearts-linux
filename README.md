@@ -22,6 +22,7 @@ On Arch, this command should install all of them:
 
 ```sh
 sudo pacman -S python python-requests python-tomlkit python-yaml wine winetricks git
+sudo winetricks --self-update
 ```
 
 **2. Clone and First Run**
@@ -44,7 +45,7 @@ It will then ask a few more questions, and allow you to add optional features li
 
 **3. Subsequent Runs**
 
-The created `settings.yaml` file stores all of your settings, and file paths for where the script should put its isolated files. You can change them at any time. 
+The created `settings.yaml` file stores all of your settings, and file paths for where the script should put its isolated files. You can change them at any time.
 
 Running the script at any time in the future will check online to download updates for all downloaded features, and update all integrations to reflect changes to your settings. It will also automatically build your selected mods.
 
