@@ -87,7 +87,7 @@ def main():
       runner_wine = os.path.join(runner, 'bin/wine')
       if settings['update_runner'] == True or not os.path.exists(runner):
          print('Checking for runner updates...')
-         download_latest(settings, 'runner', 'https://api.github.com/repos/GloriousEggroll/wine-ge-custom/releases/latest', lambda x: x['name'].endswith('.tar.xz'), True, runner)
+         download_latest(settings, settings_path, 'runner', 'https://api.github.com/repos/GloriousEggroll/wine-ge-custom/releases/latest', lambda x: x['name'].endswith('.tar.xz'), True, runner)
       if not os.path.exists(user_folder):
          subprocess.run(['wineboot'], env=dict(os.environ, WINEPREFIX=wineprefix), check=True)
       winetricks = []
@@ -201,7 +201,7 @@ def main():
       pana_settings = settings['mods'].get('panacea_settings')
       if settings['mods']['update_openkh'] == True or not os.path.exists(openkh_folder):
          print('Checking for OpenKH updates...')
-         downloaded = download_latest(settings, 'openkh', 'https://api.github.com/repos/OpenKH/OpenKh/releases/tags/latest', lambda x: x['name'] == 'openkh.zip', True, openkh_folder)
+         downloaded = download_latest(settings, settings_path, 'openkh', 'https://api.github.com/repos/OpenKH/OpenKh/releases/tags/latest', lambda x: x['name'] == 'openkh.zip', True, openkh_folder)
       else:
          downloaded = False
       if downloaded and not os.path.exists(mods_manager):
@@ -322,7 +322,7 @@ def main():
       if (refined_folder := settings['mods'].get('refined')) is not None:
          if settings['mods']['update_refined'] == True or not os.path.exists(refined_folder):
             print('Checking for ReFined updates...')
-            download_latest(settings, 'refined', 'https://api.github.com/repos/KH-ReFined/KH-ReFined/releases', lambda x: x['name'].endswith('.zip') or x['name'].endswith('.rar'), False, refined_folder)
+            download_latest(settings, settings_path, 'refined', 'https://api.github.com/repos/KH-ReFined/KH-ReFined/releases', lambda x: x['name'].endswith('.zip') or x['name'].endswith('.rar'), False, refined_folder)
             download_mod('kh2', 'KH-ReFined/KH2-MAIN')
             if settings['mods'].get('refined.vanilla_ost') == True:
                download_mod('kh2', 'KH-ReFined/KH2-VanillaOST')
@@ -353,7 +353,7 @@ def main():
       if (randomizer_folder := settings['mods'].get('randomizer')) is not None:
          if settings['mods']['update_randomizer'] == True or not os.path.exists(randomizer_folder):
             print('Checking for Randomizer updates...')
-            download_latest(settings, 'randomizer', 'https://api.github.com/repos/tommadness/KH2Randomizer/releases/latest', lambda x: x['name'] == 'Kingdom.Hearts.II.Final.Mix.Randomizer.zip', False, randomizer_folder)
+            download_latest(settings, settings_path, 'randomizer', 'https://api.github.com/repos/tommadness/KH2Randomizer/releases/latest', lambda x: x['name'] == 'Kingdom.Hearts.II.Final.Mix.Randomizer.zip', False, randomizer_folder)
             download_mod('kh2', 'KH2FM-Mods-Num/GoA-ROM-Edition')
          else:
             del mod_changes['kh2']['KH2FM-Mods-Num/GoA-ROM-Edition']
@@ -439,7 +439,7 @@ def main():
    if (lua_folder := settings['mods'].get('luabackend')) is not None:
       if settings['mods']['update_luabackend'] == True or not os.path.exists(lua_folder):
          print('Checking for LuaBackend updates...')
-         download_latest(settings, 'luabackend', 'https://api.github.com/repos/Sirius902/LuaBackend/releases/latest', lambda x: x['name'] == 'DBGHELP.zip', False, lua_folder)
+         download_latest(settings, settings_path, 'luabackend', 'https://api.github.com/repos/Sirius902/LuaBackend/releases/latest', lambda x: x['name'] == 'DBGHELP.zip', False, lua_folder)
       toml_user = settings['mods'].get('luabackend_config')
       toml_default = os.path.join(lua_folder, 'LuaBackend.toml')
       if os.path.exists(toml_default):
@@ -529,7 +529,7 @@ def main():
       yaml.dump(settings, data_file, sort_keys=False, width=1000)
 
 
-def download_latest(settings, date_key, url, predicate, has_extra_folder, destination_folder):
+def download_latest(settings, settings_path, date_key, url, predicate, has_extra_folder, destination_folder):
    date = settings['downloads'].get(date_key)
    rq = requests.get(url, timeout=10)
    if rq.status_code != 200:
@@ -546,7 +546,7 @@ def download_latest(settings, date_key, url, predicate, has_extra_folder, destin
       release = None
       releases = json.loads(rq.text)
       for next_release in releases:
-         release_time = datetime.datetime.fromisoformat(next_release['published_at'].removesuffix('Z'))
+         release_time = datetime.datetime.fromisoformat(next_release['published_at'])
          if newest is None or release_time > newest:
             newest = release_time
             release = next_release
@@ -557,7 +557,7 @@ def download_latest(settings, date_key, url, predicate, has_extra_folder, destin
    for asset in release['assets']:
       if not predicate(asset):
          continue
-      asset_date = datetime.datetime.fromisoformat(asset['updated_at'].removesuffix('Z'))
+      asset_date = datetime.datetime.fromisoformat(asset['updated_at'])
       if date is None or asset_date > date or not os.path.exists(destination_folder):
          print(f'Downloading update: {release["tag_name"]}')
          rq = requests.get(asset['browser_download_url'], timeout=10)
@@ -581,8 +581,13 @@ def download_latest(settings, date_key, url, predicate, has_extra_folder, destin
             pyunpack.Archive(temp_zip).extractall(destination_folder)
          shutil.rmtree(temp_folder)
          settings['downloads'][date_key] = asset_date
+         save_settings(settings, settings_path)
          return True
    return False
+
+def save_settings(settings, settings_path):
+   with open(settings_path, 'w', encoding='utf-8') as data_file:
+      yaml.dump(settings, data_file, sort_keys=False, width=1000)
 
 def get_settings(settings_path):
    if os.path.exists(settings_path):
@@ -761,8 +766,7 @@ def get_settings(settings_path):
          if 'luabackend_config' not in settings['mods']:
             settings['mods']['luabackend_config'] = os.path.join(base_folder, 'LuaBackend.toml')
 
-   with open(settings_path, 'w', encoding='utf-8') as data_file:
-      yaml.dump(settings, data_file, sort_keys=False, width=1000)
+   save_settings(settings, settings_path)
 
    return (settings, settings != old_settings)
 
