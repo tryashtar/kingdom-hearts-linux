@@ -71,7 +71,7 @@ The `EPIC` folder is renamed to `EPIC.bak` to prevent crashes when playing unsup
 
 [LuaBackend](https://github.com/Sirius902/LuaBackend): Will be downloaded and updated. The DLLs will be symlinked into the install folders. The configuration will be updated to include loading scripts from OpenKH mod folders.
 
-[KH ReFined](https://github.com/TopazTK/KH-ReFined): Will be downloaded and updated. `dotnet` will be installed in the wineprefix to allow launching it. Its executable and DLLs will be symlinked into the install folders. The vanilla executable will be preserved, and restored if ReFined is ever removed. Its required patch will be installed and updated. Optional addons are also available.
+[KH ReFined](https://github.com/KH-ReFined/KH-ReFined): Will be downloaded and updated. `dotnet` will be installed in the wineprefix to allow launching it. Its executable and DLLs will be symlinked into the install folders. The vanilla executable will be preserved, and restored if ReFined is ever removed. Its required patch will be installed and updated. Optional addons are also available.
 
 [KH2 Randomizer](https://tommadness.github.io/KH2Randomizer): Will be downloaded and updated. Its required patch will be installed and updated.
 
