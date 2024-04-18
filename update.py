@@ -546,7 +546,7 @@ def download_latest(settings, settings_path, date_key, url, predicate, has_extra
       release = None
       releases = json.loads(rq.text)
       for next_release in releases:
-         release_time = datetime.datetime.fromisoformat(next_release['published_at'])
+         release_time = datetime.datetime.fromisoformat(next_release['published_at'].replace('Z', '+00:00'))
          if newest is None or release_time > newest:
             newest = release_time
             release = next_release
@@ -557,7 +557,7 @@ def download_latest(settings, settings_path, date_key, url, predicate, has_extra
    for asset in release['assets']:
       if not predicate(asset):
          continue
-      asset_date = datetime.datetime.fromisoformat(asset['updated_at'])
+      asset_date = datetime.datetime.fromisoformat(asset['updated_at'].replace('Z', '+00:00'))
       if date is None or asset_date > date or not os.path.exists(destination_folder):
          print(f'Downloading update: {release["tag_name"]}')
          rq = requests.get(asset['browser_download_url'], timeout=10)
