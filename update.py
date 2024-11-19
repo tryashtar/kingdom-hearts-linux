@@ -75,19 +75,17 @@ def main():
             dlls.append('dinput8=n,b')
          if len(dlls) > 0:
             env_vars.append(f'WINEDLLOVERRIDES="{";".join(dlls)}"')
+         gameid = {'kh1':'umu-2552430','kh2':'umu-2552430','khrecom':'umu-2552430','khbbs':'umu-2552430','khddd':'umu-2552430','kh0.2':'umu-2552450','kh3':'umu-2552450','khmom':'umu-2552430'}
+         env_vars.append(f'GAMEID="{gameid[name]}"')
+         env_vars.append('STORE="egs"')
          with open(path, 'w', encoding='utf-8') as sh_file:
-            sh_file.write(f'#!/bin/sh\ncd "{folder}" || exit 1\n{" ".join(env_vars)} "{runner_wine}" "{exe}"\n')
+            sh_file.write(f'#!/bin/sh\ncd "{folder}" || exit 1\n{" ".join(env_vars)} umu-run "{exe}"\n')
          st = os.stat(path)
          os.chmod(path, st.st_mode | stat.S_IEXEC)
       convert_path = path_conv_linux
       run_program = run_program_linux
       make_launch = make_launch_linux
       user_folder = os.path.join(wineprefix, 'drive_c/users', os.getlogin())
-      runner = settings['runner']
-      runner_wine = os.path.join(runner, 'bin/wine')
-      if settings['update_runner'] == True or not os.path.exists(runner):
-         print('Checking for runner updates...')
-         download_latest(settings, settings_path, 'runner', 'https://api.github.com/repos/GloriousEggroll/wine-ge-custom/releases/latest', lambda x: x['name'].endswith('.tar.xz'), True, runner)
       if not os.path.exists(user_folder):
          subprocess.run(['wineboot'], env=dict(os.environ, WINEPREFIX=wineprefix), check=True)
       winetricks = []
@@ -143,16 +141,16 @@ def main():
    backup_vanilla = False
    if kh15_folder is not None:
       epic_folder = os.path.join(kh15_folder, 'EPIC')
-      if is_linux and os.path.exists(epic_folder) and len(os.listdir(epic_folder)) > 0:
-         print('Renaming KH 1.5+2.5 EPIC folder to EPIC.bak to prevent crashes during FMVs')
-         os.rename(epic_folder, os.path.join(kh15_folder, 'EPIC.bak'))
       remove_symlinks.add(os.path.join(kh15_folder, 'x64'))
       remove_symlinks.add(os.path.join(kh15_folder, 'Keystone.Net.dll'))
       remove_symlinks.add(os.path.join(kh15_folder, 'keystone.dll'))
       remove_symlinks.add(os.path.join(kh15_folder, 'Newtonsoft.Json.dll'))
+      remove_symlinks.add(os.path.join(kh15_folder, 'ViGEmClient.dll'))
+      remove_symlinks.add(os.path.join(kh15_folder, 'System.Runtime.CompilerServices.Unsafe.dll'))
       if kh2launch is not None:
          remove_symlinks.add(kh2launch)
       remove_symlinks.add(os.path.join(kh15_folder, 'reFined.ini'))
+      remove_symlinks.add(os.path.join(kh15_folder, 'reFined.cfg'))
       remove_symlinks.add(os.path.join(kh15_folder, 'version.dll'))
       remove_symlinks.add(os.path.join(kh15_folder, 'DINPUT8.dll'))
       remove_symlinks.add(os.path.join(kh15_folder, 'DBGHELP.dll'))
@@ -176,9 +174,6 @@ def main():
    
    if kh28_folder is not None:
       epic_folder = os.path.join(kh28_folder, 'EPIC')
-      if is_linux and os.path.exists(epic_folder) and len(os.listdir(epic_folder)) > 0:
-         print('Renaming KH 2.8 EPIC folder to EPIC.bak to prevent crashes during FMVs')
-         os.rename(epic_folder, os.path.join(kh28_folder, 'EPIC.bak'))
       remove_symlinks.add(os.path.join(kh28_folder, 'DINPUT8.dll'))
       remove_symlinks.add(os.path.join(kh28_folder, 'DBGHELP.dll'))
       remove_symlinks.add(os.path.join(kh28_folder, 'lua54.dll'))
@@ -344,10 +339,14 @@ def main():
                make_symlink(os.path.join(kh15_folder, 'keystone.dll'), os.path.join(refined_folder, 'keystone.dll'), False)
             if os.path.exists(os.path.join(refined_folder, 'Newtonsoft.Json.dll')):
                make_symlink(os.path.join(kh15_folder, 'Newtonsoft.Json.dll'), os.path.join(refined_folder, 'Keystone.Net.dll'), False)
+            if os.path.exists(os.path.join(refined_folder, 'ViGEmClient.dll')):
+               make_symlink(os.path.join(kh15_folder, 'ViGEmClient.dll'), os.path.join(refined_folder, 'ViGEmClient.dll'), False)
+            if os.path.exists(os.path.join(refined_folder, 'System.Runtime.CompilerServices.Unsafe.dll')):
+               make_symlink(os.path.join(kh15_folder, 'System.Runtime.CompilerServices.Unsafe.dll'), os.path.join(refined_folder, 'System.Runtime.CompilerServices.Unsafe.dll'), False)
             if kh2launch is not None:
                make_symlink(kh2launch, os.path.join(refined_folder, 'KINGDOM HEARTS II FINAL MIX.exe'), False)
             if (refined_ini := settings['mods'].get('refined_config')) is not None:
-               make_symlink(os.path.join(kh15_folder, 'reFined.ini'), refined_ini, False)
+               make_symlink(os.path.join(kh15_folder, 'reFined.cfg'), refined_ini, False)
             backup_vanilla = True
 
       if (randomizer_folder := settings['mods'].get('randomizer')) is not None:
@@ -679,15 +678,8 @@ def get_settings(settings_path):
    base_folder = settings['folder']
 
    if platform.system() == 'Linux':
-      if 'runner' not in settings:
-         print('Linux detected: the games will be run with an automatically-configured build of Wine.')
-         print()
-         settings['runner'] = os.path.join(base_folder, 'runner')
-      
-      if 'update_runner' not in settings:
-         settings['update_runner'] = True
-
       if 'wineprefix' not in settings:
+         print('Linux detected: the games will be run with an automatically-configured build of Wine.')
          settings['wineprefix'] = os.path.join(base_folder, 'wineprefix')
 
       if 'launch' not in settings:
@@ -710,7 +702,7 @@ def get_settings(settings_path):
          print()
       if settings['mods']['refined'] is not None:
          if 'refined_config' not in settings['mods']:
-            settings['mods']['refined_config'] = os.path.join(base_folder, 'reFined.ini')
+            settings['mods']['refined_config'] = os.path.join(base_folder, 'reFined.cfg')
          if 'openkh' not in settings['mods']:
             settings['mods']['openkh'] = os.path.join(base_folder, 'OpenKH')
       if settings['mods']['refined'] is not None:
