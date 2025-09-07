@@ -1,3 +1,5 @@
+import abc
+import typing
 import requests
 import json
 import shutil
@@ -8,152 +10,120 @@ import tomlkit
 import yaml
 import tempfile
 import stat
-import copy
 import platform
 import pyunpack
+import pathlib
+from settings import KhGame, Settings, get_settings, save_settings
 
 def main():
-   settings_path = os.path.join(os.path.dirname(__file__), 'settings.yaml')
-   settings, changed = get_settings(settings_path)
-   if changed:
-      print('Settings changed!')
-      print('Feel free to change your settings in \'settings.yaml\' now or any time.')
-      print('Then run the script again to update your setup.')
-      input()
-      return
-   if 'downloads' not in settings:
-      settings['downloads'] = {}
+   settings_path = pathlib.Path(__file__).parent / 'settings.yaml'
+   settings = get_settings(settings_path)
    print('Starting!')
 
-   remove_symlinks = set()
-   def make_symlink(new, existing, is_dir):
+   remove_symlinks: set[pathlib.Path] = set()
+   def make_symlink(new: pathlib.Path, existing: pathlib.Path, is_dir: bool):
       if new in remove_symlinks:
          remove_symlinks.remove(new)
-      if os.path.islink(new):
-         target = os.readlink(new)
+      if new.is_symlink():
+         target = new.readlink()
          if target == existing:
             return
          print(f'Removing previous symlink in \'{new}\' pointing to \'{target}\'')
-         os.remove(new)
-      if not os.path.exists(new):
+         new.unlink()
+      if not new.exists():
          print(f'Creating symlink in \'{new}\' pointing to \'{existing}\'')
-         os.makedirs(os.path.dirname(new), exist_ok=True)
-         os.symlink(existing, new, target_is_directory=is_dir)
+         new.parent.mkdir(parents=True, exist_ok=True)
+         new.symlink_to(existing, target_is_directory=is_dir)
 
-   kh15_folder = settings['installs']['kh1.5+2.5']
-   kh28_folder = settings['installs']['kh2.8']
-   kh3_folder = settings['installs']['kh3']
-   khmom_folder = settings['installs']['khmom']
-   kh2launch = settings['installs'].get('kh2.exe')
-   openkh_folder = settings['mods'].get('openkh')
    is_linux = platform.system() == 'Linux'
    
    if is_linux:
-      wineprefix = settings['wineprefix']
-      def path_conv_linux(path):
-         return subprocess.run(['winepath', '-w', path], check=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=dict(os.environ, WINEPREFIX=wineprefix)).stdout.decode('utf-8').rstrip('\n')
-      def run_program_linux(args):
-         cmds = ['wine']
-         cmds.extend(args)
-         return subprocess.run(cmds, check=True, env=dict(os.environ, WINEPREFIX=wineprefix))
-      def make_launch_linux(name, folder, has_panacea, has_luabackend, has_refined):
-         if folder is None:
-            return
-         path = settings['launch'].get(name)
-         if path is None:
-            return 
-         exe = settings['installs'].get(name + '.exe')
-         if exe is None:
-            return
-         os.makedirs(os.path.dirname(path), exist_ok=True)
-         env_vars = [f'WINEPREFIX="{wineprefix}"','WINEFSYNC=1','WINE_FULLSCREEN_FSR=1','WINEDEBUG=-all']
-         dlls = []
-         if has_panacea and settings['mods'].get('panacea') == True:
-            dlls.append('version=n,b')
-         if has_luabackend and settings['mods'].get('luabackend') is not None:
-            dlls.append('dinput8=n,b')
-         if has_refined and settings['mods'].get('refined') is not None:
-            dlls.append('keystone=n,b')
-            dlls.append('newtonsoft=n,b')
-         if len(dlls) > 0:
-            env_vars.append(f'WINEDLLOVERRIDES="{";".join(dlls)}"')
-         gameid = {'kh1':'umu-2552430','kh2':'umu-2552430','khrecom':'umu-2552430','khbbs':'umu-2552430','khddd':'umu-2552430','kh0.2':'umu-2552450','kh3':'umu-2552450','khmom':'umu-2552430'}
-         env_vars.append(f'GAMEID="{gameid[name]}"')
-         env_vars.append('STORE="egs"')
-         with open(path, 'w', encoding='utf-8') as sh_file:
-            sh_file.write(f'#!/bin/sh\ncd "{folder}" || exit 1\n{" ".join(env_vars)} umu-run "{exe}"\n')
-         st = os.stat(path)
-         os.chmod(path, st.st_mode | stat.S_IEXEC)
-      convert_path = path_conv_linux
-      run_program = run_program_linux
-      make_launch = make_launch_linux
-      user_folder = os.path.join(wineprefix, 'drive_c/users', os.getlogin())
-      if not os.path.exists(user_folder):
-         subprocess.run(['wineboot'], env=dict(os.environ, WINEPREFIX=wineprefix), check=True)
-      winetricks = []
-      if os.path.exists(os.path.join(wineprefix, 'winetricks.log')):
-         with open(os.path.join(wineprefix, 'winetricks.log'), 'r', encoding='utf-8') as winetricks_file:
+      print('Linux detected')
+      assert settings.wineprefix is not None
+      environment = LinuxEnvironment(settings)
+      # should we do steamuser?
+      if not environment.user_folder.exists():
+         print('Creating wineprefix')
+         subprocess.run(
+            ['wineboot'],
+            check=True,
+            env=environment.wine_env
+         )
+         docs_folder = environment.user_folder / 'Documents'
+         if docs_folder.is_symlink():
+            print('Unlinking new documents folder')
+            docs_folder.unlink()
+      winetricks: list[str] = []
+      winetricks_log = settings.wineprefix / 'winetricks.log'
+      if winetricks_log.exists():
+         with open(winetricks_log, 'r', encoding='utf-8') as winetricks_file:
             winetricks = [line.rstrip('\n') for line in winetricks_file]
-      if settings['mods'].get('refined') is not None and 'dotnet48' not in winetricks:
-         print('Installing dotnet to wineprefix (this will take some time)')
-         subprocess.run(['winetricks', '-q', 'dotnet20', 'dotnet48'], env=dict(os.environ, WINEPREFIX=wineprefix), check=True)
-      if openkh_folder is not None and 'dotnet6' not in winetricks:
+      if settings.mods.openkh is not None and 'dotnet6' not in winetricks:
+         # is this needed?
          print('Installing dotnet6 to wineprefix')
-         subprocess.run(['winetricks', '-q', 'dotnet6'], env=dict(os.environ, WINEPREFIX=wineprefix), check=True)
-         subprocess.run(['wine', 'reg', 'add', 'HKEY_CURRENT_USER\\Environment', '/f', '/v', 'DOTNET_ROOT', '/t', 'REG_SZ', '/d', 'C:\\Program Files\\dotnet'], env=dict(os.environ, WINEPREFIX=wineprefix), check=True)
-      if openkh_folder is not None and 'dotnetdesktop6' not in winetricks:
+         subprocess.run(
+            ['winetricks', '-q', 'dotnet6'],
+            check=True,
+            env=environment.wine_env
+         )
+         subprocess.run(
+            ['wine', 'reg', 'add', 'HKEY_CURRENT_USER\\Environment', '/f', '/v', 'DOTNET_ROOT', '/t', 'REG_SZ', '/d', 'C:\\Program Files\\dotnet'],
+            check=True,
+            env=environment.wine_env
+         )
+      if settings.mods.openkh is not None and 'dotnetdesktop6' not in winetricks:
+         # is this needed?
          print('Installing dotnetdesktop6 to wineprefix')
-         subprocess.run(['winetricks', '-q', 'dotnetdesktop6'], env=dict(os.environ, WINEPREFIX=wineprefix), check=True)
-      if (kh15_folder is not None or kh28_folder is not None) and 'vkd3d' not in winetricks:
+         subprocess.run(
+            ['winetricks', '-q', 'dotnetdesktop6'],
+            check=True,
+            env=environment.wine_env
+         )
+      if (settings.games.kh15_25 is not None or settings.games.kh28 is not None) and 'vkd3d' not in winetricks:
+         # is this needed?
          print('Installing VKD3D to wineprefix')
-         subprocess.run(['winetricks', '-q', 'dxvk', 'vkd3d'], env=dict(os.environ, WINEPREFIX=wineprefix), check=True)
+         subprocess.run(
+            ['winetricks', '-q', 'dxvk', 'vkd3d'],
+            check=True,
+            env=environment.wine_env
+         )
    else:
-      user_folder = os.path.expanduser('~')
-      def convert_path_windows(path):
-         return path
-      def run_program_windows(args):
-         return subprocess.run(args, check=True)
-      def make_launch_windows(_name, _folder, _has_panacea, _has_luabackend, _has_refined):
-         return
-      convert_path = convert_path_windows
-      run_program = run_program_windows
-      make_launch = make_launch_windows
+      print('Windows detected')
+      environment = WindowsEnvironment()
 
-   if os.path.islink(os.path.join(user_folder, 'Documents')):
-      os.remove(os.path.join(user_folder, 'Documents'))
-   remove_symlinks.add(os.path.join(user_folder, 'Documents/Kingdom Hearts/Configuration/1638'))
-   remove_symlinks.add(os.path.join(user_folder, 'Documents/Kingdom Hearts/Save Data/1638'))
-   remove_symlinks.add(os.path.join(user_folder, 'Documents/KINGDOM HEARTS HD 1.5+2.5 ReMIX/Epic Games Store/1638'))
-   remove_symlinks.add(os.path.join(user_folder, 'Documents/KINGDOM HEARTS HD 2.8 Final Chapter Prologue/Epic Games Store/1638'))
-   remove_symlinks.add(os.path.join(user_folder, 'Documents/KINGDOM HEARTS III/Epic Games Store/1638'))
-   remove_symlinks.add(os.path.join(user_folder, 'Documents/KINGDOM HEARTS Melody of Memory/Epic Games Store'))
-   if (save := settings['saves']['kh1.5+2.5']) is not None and kh15_folder is not None:
-      os.makedirs(save, exist_ok=True)
-      make_symlink(os.path.join(user_folder, 'Documents/KINGDOM HEARTS HD 1.5+2.5 ReMIX/Epic Games Store/1638'), save, True)
-      if settings['mods'].get('refined') is not None:
-         make_symlink(os.path.join(user_folder, 'Documents/Kingdom Hearts/Configuration/1638'), save, True)
-         make_symlink(os.path.join(user_folder, 'Documents/Kingdom Hearts/Save Data/1638'), save, True)
-   if (save := settings['saves']['kh2.8']) is not None and kh28_folder is not None:
-      os.makedirs(save, exist_ok=True)
-      make_symlink(os.path.join(user_folder, 'Documents/KINGDOM HEARTS HD 2.8 Final Chapter Prologue/Epic Games Store/1638'), save, True)
-   if (save := settings['saves']['kh3']) is not None and kh3_folder is not None:
-      os.makedirs(save, exist_ok=True)
-      make_symlink(os.path.join(user_folder, 'Documents/KINGDOM HEARTS III/Epic Games Store/1638'), save, True)
-   if (save := settings['saves']['khmom']) is not None and khmom_folder is not None:
-      os.makedirs(save, exist_ok=True)
-      make_symlink(os.path.join(user_folder, 'Documents/KINGDOM HEARTS Melody of Memory/Epic Games Store'), save, True)
+   print('Checking save folders')
+   if settings.games.kh15_25 is not None and settings.games.kh15_25.saves is not None:
+      save = settings.games.kh15_25.saves
+      save.mkdir(parents=True, exist_ok=True)
+      if settings.epic_id is not None and settings.games.kh15_25.store == 'epic':
+         make_symlink(environment.user_folder / 'Documents/KINGDOM HEARTS HD 1.5+2.5 ReMIX/Epic Games Store' / str(settings.epic_id), save, True)
+      if settings.steam_id is not None and settings.games.kh15_25.store == 'steam':
+         make_symlink(environment.user_folder / 'Documents/My Games/KINGDOM HEARTS HD 1.5+2.5 ReMIX/Steam' / str(settings.steam_id), save, True)
+      if settings.mods.refined is not None:
+         make_symlink(environment.user_folder / 'Documents/Kingdom Hearts/Configuration', save, True)
+         make_symlink(environment.user_folder / 'Documents/Kingdom Hearts/Save Data', save, True)
+   if settings.games.kh28 is not None and settings.games.kh28.saves is not None:
+      save = settings.games.kh28.saves
+      save.mkdir(parents=True, exist_ok=True)
+      if settings.epic_id is not None and settings.games.kh28.store == 'epic':
+         make_symlink(environment.user_folder / 'Documents/KINGDOM HEARTS HD 2.8 Final Chapter Prologue/Epic Games Store' / str(settings.epic_id), save, True)
+      if settings.steam_id is not None and settings.games.kh28.store == 'steam':
+         make_symlink(environment.user_folder / 'Documents/My Games/KINGDOM HEARTS HD 2.8 Final Chapter Prologue/Steam' / str(settings.steam_id), save, True)
+   if settings.games.kh3 is not None and settings.games.kh3.saves is not None:
+      save = settings.games.kh3.saves
+      save.mkdir(parents=True, exist_ok=True)
+      if settings.epic_id is not None and settings.games.kh3.store == 'epic':
+         make_symlink(environment.user_folder / 'Documents/KINGDOM HEARTS III/Epic Games Store' / str(settings.epic_id), save, True)
+      if settings.steam_id is not None and settings.games.kh3.store == 'steam':
+         make_symlink(environment.user_folder / 'Documents/My Games/KINGDOM HEARTS III/Steam' / str(settings.steam_id), save, True)
+   if settings.games.khmom is not None and settings.games.khmom.saves is not None:
+      save = settings.games.khmom.saves
+      save.mkdir(parents=True, exist_ok=True)
+      if settings.epic_id is not None and settings.games.khmom.store == 'epic':
+         make_symlink(environment.user_folder / 'Documents/KINGDOM HEARTS Melody of Memory/Epic Games Store' / str(settings.epic_id), save, True)
+      if settings.steam_id is not None and settings.games.khmom.store == 'steam':
+         make_symlink(environment.user_folder / 'Documents/My Games/KINGDOM HEARTS Melody of Memory/Steam' / str(settings.steam_id), save, True)
    
-   backup_vanilla = False
-   if kh15_folder is not None:
-      epic_folder = os.path.join(kh15_folder, 'EPIC')
-      remove_symlinks.add(os.path.join(kh15_folder, 'x64'))
-      remove_symlinks.add(os.path.join(kh15_folder, 'Keystone.Net.dll'))
-      remove_symlinks.add(os.path.join(kh15_folder, 'keystone.dll'))
-      remove_symlinks.add(os.path.join(kh15_folder, 'Newtonsoft.Json.dll'))
-      remove_symlinks.add(os.path.join(kh15_folder, 'ViGEmClient.dll'))
-      remove_symlinks.add(os.path.join(kh15_folder, 'System.Runtime.CompilerServices.Unsafe.dll'))
-      if kh2launch is not None:
-         remove_symlinks.add(kh2launch)
       remove_symlinks.add(os.path.join(kh15_folder, 'reFined.ini'))
       remove_symlinks.add(os.path.join(kh15_folder, 'reFined.cfg'))
       remove_symlinks.add(os.path.join(kh15_folder, 'version.dll'))
@@ -163,19 +133,7 @@ def main():
       remove_symlinks.add(os.path.join(kh15_folder, 'panacea_settings.txt'))
       remove_symlinks.add(os.path.join(kh15_folder, 'lua54.dll'))
       remove_symlinks.add(os.path.join(kh15_folder, 'LuaBackend.toml'))
-      remove_symlinks.add(os.path.join(kh15_folder, 'dependencies/avcodec-vgmstream-59.dll'))
-      remove_symlinks.add(os.path.join(kh15_folder, 'dependencies/avformat-vgmstream-59.dll'))
-      remove_symlinks.add(os.path.join(kh15_folder, 'dependencies/avutil-vgmstream-57.dll'))
-      remove_symlinks.add(os.path.join(kh15_folder, 'dependencies/bass.dll'))
-      remove_symlinks.add(os.path.join(kh15_folder, 'dependencies/bass_vgmstream.dll'))
-      remove_symlinks.add(os.path.join(kh15_folder, 'dependencies/libatrac9.dll'))
-      remove_symlinks.add(os.path.join(kh15_folder, 'dependencies/libcelt-0061.dll'))
-      remove_symlinks.add(os.path.join(kh15_folder, 'dependencies/libcelt-0110.dll'))
-      remove_symlinks.add(os.path.join(kh15_folder, 'dependencies/libg719_decode.dll'))
-      remove_symlinks.add(os.path.join(kh15_folder, 'dependencies/libmpg123-0.dll'))
-      remove_symlinks.add(os.path.join(kh15_folder, 'dependencies/libspeex-1.dll'))
-      remove_symlinks.add(os.path.join(kh15_folder, 'dependencies/libvorbis.dll'))
-      remove_symlinks.add(os.path.join(kh15_folder, 'dependencies/swresample-vgmstream-4.dll'))
+
    
    if kh28_folder is not None:
       epic_folder = os.path.join(kh28_folder, 'EPIC')
@@ -319,7 +277,7 @@ def main():
             del mod_changes[game][repo]
 
       mod_changes = {'kh2':{'KH2FM-Mods-Num/GoA-ROM-Edition': False, 'KH-ReFined/KH2-VanillaOST': False, 'KH-ReFined/KH2-VanillaEnemy': False, 'KH-ReFined/KH2-MultiAudio': False, 'KH-ReFined/KH2-MAIN': False}}
-      if (refined_folder := settings['mods'].get('refined')) is not None:
+            if (refined_folder := settings['mods'].get('refined')) is not None:
          if settings['mods']['update_refined'] == True or not os.path.exists(refined_folder):
             print('Checking for ReFined updates...')
             download_latest(settings, settings_path, 'refined', 'https://api.github.com/repos/KH-ReFined/KH-ReFined/releases', lambda x: x['name'].endswith('.zip') or x['name'].endswith('.rar'), False, refined_folder)
@@ -353,6 +311,7 @@ def main():
             if (refined_ini := settings['mods'].get('refined_config')) is not None:
                make_symlink(os.path.join(kh15_folder, 'reFined.cfg'), refined_ini, False)
             backup_vanilla = True
+
 
       if (randomizer_folder := settings['mods'].get('randomizer')) is not None:
          if settings['mods']['update_randomizer'] == True or not os.path.exists(randomizer_folder):
@@ -529,252 +488,138 @@ def main():
    make_launch('kh3', kh3_folder, False, False, False)
    make_launch('khmom', khmom_folder, False, False, False)
 
-   with open(settings_path, 'w', encoding='utf-8') as data_file:
-      yaml.dump(settings, data_file, sort_keys=False, width=1000)
+class Environment(abc.ABC):
+   @abc.abstractmethod
+   def convert_path(self, path: pathlib.Path) -> pathlib.Path: pass
+   @abc.abstractmethod
+   def run_program(self, args: list[str]) -> subprocess.CompletedProcess: pass
+   @abc.abstractmethod
+   def make_launch(self, name, folder, has_panacea, has_luabackend): pass
 
+class WindowsEnvironment(Environment):
+   def __init__(self):
+      self.user_folder = pathlib.Path.home()
+   
+   def convert_path(self, path: pathlib.Path) -> pathlib.Path:
+      return path
+   
+   def run_program(self, args: list[str]) -> subprocess.CompletedProcess:
+      return subprocess.run(args, check=True)
+   
+   def make_launch(self, name, folder, has_panacea, has_luabackend):
+      return
 
-def download_latest(settings, settings_path, date_key, url, predicate, has_extra_folder, destination_folder):
-   date = settings['downloads'].get(date_key)
-   rq = requests.get(url, timeout=10)
-   if rq.status_code != 200:
-      print(f'Error {rq.status_code}!')
+class LinuxEnvironment(Environment):
+   def __init__(self, settings: Settings):
+      assert settings.wineprefix is not None
+      self.wine_env = dict(os.environ, WINEPREFIX=str(settings.wineprefix))
+      self.user_folder = settings.wineprefix / 'drive_c/users' / os.getlogin()
+      
+   def convert_path(self, path: pathlib.Path) -> pathlib.Path:
+      result = subprocess.run(
+         ['winepath', '-w', str(path)],
+         check=True,
+         stdout=subprocess.PIPE,
+         stderr=subprocess.DEVNULL,
+         env=self.wine_env
+      ).stdout.decode('utf-8').rstrip('\n')
+      return pathlib.Path(result)
+
+   def run_program(self, args: list[str]) -> subprocess.CompletedProcess:
+      cmds = ['wine']
+      cmds.extend(args)
+      return subprocess.run(
+         cmds,
+         check=True,
+         env=self.wine_env
+      )
+      
+   def make_launch(self, name, folder, has_panacea, has_luabackend):
+      if folder is None:
+         return
+      path = settings['launch'].get(name)
+      if path is None:
+         return 
+      exe = settings['installs'].get(name + '.exe')
+      if exe is None:
+         return
+      os.makedirs(os.path.dirname(path), exist_ok=True)
+      env_vars = [f'WINEPREFIX="{wineprefix}"','WINEFSYNC=1','WINE_FULLSCREEN_FSR=1','WINEDEBUG=-all']
+      dlls = []
+      if has_panacea and settings['mods'].get('panacea') == True:
+         dlls.append('version=n,b')
+      if has_luabackend and settings['mods'].get('luabackend') is not None:
+         dlls.append('dinput8=n,b')
+      if len(dlls) > 0:
+         env_vars.append(f'WINEDLLOVERRIDES="{";".join(dlls)}"')
+      gameid = {'kh1':'umu-2552430','kh2':'umu-2552430','khrecom':'umu-2552430','khbbs':'umu-2552430','khddd':'umu-2552430','kh0.2':'umu-2552450','kh3':'umu-2552450','khmom':'umu-2552430'}
+      env_vars.append(f'GAMEID="{gameid[name]}"')
+      env_vars.append('STORE="egs"')
+      with open(path, 'w', encoding='utf-8') as sh_file:
+         sh_file.write(f'#!/bin/sh\ncd "{folder}" || exit 1\n{" ".join(env_vars)} exec umu-run "{exe}"\n')
+      st = os.stat(path)
+      os.chmod(path, st.st_mode | stat.S_IEXEC)
+
+def download_latest(
+   last_date: datetime.datetime | None,
+   name: str,
+   url: str,
+   predicate: typing.Callable[[dict[str, typing.Any]], bool],
+   has_extra_folder: bool,
+   destination_folder: pathlib.Path
+) -> datetime.datetime | None:
+   response = requests.get(url, timeout=10)
+   if response.status_code != 200:
+      print(f'Error {response.status_code}!')
       try:
-         print(json.loads(rq.text)['message'])
+         print(json.loads(response.text)['message'])
       except json.JSONDecodeError:
-         print(rq.text)
+         print(response.text)
       if not os.path.exists(destination_folder):
-         rq.raise_for_status()
-      return False
+         response.raise_for_status()
+      return None
    if url.endswith('/releases'):
-      newest = None
-      release = None
-      releases = json.loads(rq.text)
+      newest: datetime.datetime | None = None
+      release: dict[str, typing.Any] | None = None
+      releases: list[dict[str, typing.Any]] = json.loads(response.text)
       for next_release in releases:
          release_time = datetime.datetime.fromisoformat(next_release['published_at'].replace('Z', '+00:00'))
          if newest is None or release_time > newest:
             newest = release_time
             release = next_release
       if release is None:
-         return False
+         return None
    else:
-      release = json.loads(rq.text)
+      release = json.loads(response.text)
+      assert release is not None
    for asset in release['assets']:
       if not predicate(asset):
          continue
       asset_date = datetime.datetime.fromisoformat(asset['updated_at'].replace('Z', '+00:00'))
-      if date is None or asset_date > date or not os.path.exists(destination_folder):
+      if last_date is None or asset_date > last_date or not os.path.exists(destination_folder):
          print(f'Downloading update: {release["tag_name"]}')
-         rq = requests.get(asset['browser_download_url'], timeout=10)
-         if rq.status_code != 200:
-            print(f'Error {rq.status_code}!')
-            print(rq.text)
+         response = requests.get(asset['browser_download_url'], timeout=10)
+         if response.status_code != 200:
+            print(f'Error {response.status_code}!')
+            print(response.text)
             if not os.path.exists(destination_folder):
-               rq.raise_for_status()
-            return False
-         temp_folder = tempfile.mkdtemp()
-         temp_zip = os.path.join(temp_folder, f'{date_key}.zip')
-         with open(temp_zip, 'wb') as file:
-            file.write(rq.content)
-         os.makedirs(destination_folder, exist_ok=True)
-         if has_extra_folder:
-            temp_extract = os.path.join(temp_folder, date_key)
-            os.makedirs(temp_extract, exist_ok=True)
-            pyunpack.Archive(temp_zip).extractall(temp_extract)
-            shutil.copytree(os.path.join(temp_extract, os.listdir(temp_extract)[0]), destination_folder, dirs_exist_ok=True)
-         else:
-            pyunpack.Archive(temp_zip).extractall(destination_folder)
-         shutil.rmtree(temp_folder)
-         settings['downloads'][date_key] = asset_date
-         save_settings(settings, settings_path)
-         return True
-   return False
-
-def save_settings(settings, settings_path):
-   with open(settings_path, 'w', encoding='utf-8') as data_file:
-      yaml.dump(settings, data_file, sort_keys=False, width=1000)
-
-def get_settings(settings_path):
-   if os.path.exists(settings_path):
-      with open(settings_path, 'r', encoding='utf-8') as data_file:
-         settings = yaml.safe_load(data_file)
-   else:
-      print('First-time run, welcome!')
-      print('You\'ll be asked some questions about your setup. Every time you run this script, everything will be updated according to your answers. You can change them at any time by editing or deleting settings.yaml. Anything you disable later will be seamlessly reverted; all changes made by this script are reversible.')
-      print()
-      settings = {}
-   old_settings = copy.deepcopy(settings)
-
-   if 'installs' not in settings:
-      settings['installs'] = {}
-      print('Input the folders where your Kingdom Hearts games are installed.')
-      print('For any you don\'t have, just press enter.')
-      print()
-   if 'kh1.5+2.5' not in settings['installs']:
-      print('Kingdom Hearts HD 1.5+2.5 ReMIX:')
-      while True:
-         install = input('> ')
-         if install == '':
-            install = None
-         else:
-            install = os.path.expanduser(install)
-            if not os.path.exists(os.path.join(install, 'KINGDOM HEARTS HD 1.5+2.5 ReMIX.exe')):
-               print('Couldn\t find \'KINGDOM HEARTS HD 1.5+2.5 ReMIX.exe\' in that folder. Please try again.')
-               continue
-         break
-      settings['installs']['kh1.5+2.5'] = install
-      print()
-   if (install := settings['installs']['kh1.5+2.5']) is not None:
-      if 'kh1.exe' not in settings['installs']:
-         settings['installs']['kh1.exe'] = os.path.join(install, 'KINGDOM HEARTS FINAL MIX.exe')
-      if 'kh2.exe' not in settings['installs']:
-         settings['installs']['kh2.exe'] = os.path.join(install, 'KINGDOM HEARTS II FINAL MIX.exe')
-      if 'khrecom.exe' not in settings['installs']:
-         settings['installs']['khrecom.exe'] = os.path.join(install, 'KINGDOM HEARTS Re_Chain of Memories.exe')
-      if 'khbbs.exe' not in settings['installs']:
-         settings['installs']['khbbs.exe'] = os.path.join(install, 'KINGDOM HEARTS Birth by Sleep FINAL MIX.exe')
-   if 'kh2.8' not in settings['installs']:
-      print('Kingdom Hearts HD 2.8 Final Chapter Prologue:')
-      while True:
-         install = input('> ')
-         if install == '':
-            install = None
-         else:
-            install = os.path.expanduser(install)
-            if not os.path.exists(os.path.join(install, 'KINGDOM HEARTS HD 2.8 Final Chapter Prologue.exe')):
-               print('Couldn\t find \'KINGDOM HEARTS HD 2.8 Final Chapter Prologue.exe\' in that folder. Please try again.')
-               continue
-         break
-      settings['installs']['kh2.8'] = install
-      print()
-   if (install := settings['installs']['kh2.8']) is not None:
-      if 'khddd.exe' not in settings['installs']:
-         settings['installs']['khddd.exe'] = os.path.join(install, 'KINGDOM HEARTS Dream Drop Distance.exe')
-      if 'kh0.2.exe' not in settings['installs']:
-         settings['installs']['kh0.2.exe'] = os.path.join(install, 'KINGDOM HEARTS 0.2 Birth by Sleep/Binaries/Win64/KINGDOM HEARTS 0.2 Birth by Sleep.exe')
-   if 'kh3' not in settings['installs']:
-      print('Kingdom Hearts III:')
-      while True:
-         install = input('> ')
-         if install == '':
-            install = None
-         else:
-            install = os.path.expanduser(install)
-            if not os.path.exists(os.path.join(install, 'KINGDOM HEARTS III/Binaries/Win64/KINGDOM HEARTS III.exe')):
-               print('Couldn\t find \'KINGDOM HEARTS III/Binaries/Win64/KINGDOM HEARTS III.exe\' in that folder. Please try again.')
-               continue
-         break
-      settings['installs']['kh3'] = install
-      print()
-   if (install := settings['installs']['kh3']) is not None:
-      if 'kh3.exe' not in settings['installs']:
-         settings['installs']['kh3.exe'] = os.path.join(install, 'KINGDOM HEARTS III/Binaries/Win64/KINGDOM HEARTS III.exe')
-   if 'khmom' not in settings['installs']:
-      settings['installs']['khmom'] = None
-   if (install := settings['installs']['khmom']) is not None:
-      if 'khmom.exe' not in settings['installs']:
-         settings['installs']['khmom.exe'] = os.path.join(install, 'KINGDOM HEARTS Melody of Memory.exe')
-
-   if 'folder' not in settings:
-      print('Now where would you like to store the extra stuff installed by this script?')
-      folder = input('> ')
-      settings['folder'] = os.path.expanduser(folder)
-      print()
-   
-   base_folder = settings['folder']
-
-   if platform.system() == 'Linux':
-      if 'wineprefix' not in settings:
-         print('Linux detected: the games will be run with an automatically-configured build of Wine.')
-         settings['wineprefix'] = os.path.join(base_folder, 'wineprefix')
-
-      if 'launch' not in settings:
-         launch = os.path.join(base_folder, 'launch')
-         settings['launch'] = {'kh1': os.path.join(launch, 'kh1.sh'), 'khrecom': os.path.join(launch, 'khrecom.sh'), 'kh2': os.path.join(launch, 'kh2.sh'), 'khbbs': os.path.join(launch, 'khbbs.sh'), 'khddd': os.path.join(launch, 'khddd.sh'), 'kh0.2': os.path.join(launch, 'kh0.2.sh'), 'kh3': os.path.join(launch, 'kh3.sh'), 'khmom': os.path.join(launch, 'khmom.sh')}
-
-   if 'saves' not in settings:
-      saves = os.path.join(base_folder, 'Save Data')
-      settings['saves'] = {'kh1.5+2.5': os.path.join(saves, 'Kingdom Hearts 1.5+2.5'), 'kh2.8': os.path.join(saves, 'Kingdom Hearts 2.8'), 'kh3': os.path.join(saves, 'Kingdom Hearts III'), 'khmom': os.path.join(saves, 'Kingdom Hearts Melody of Memory')}
-
-   if 'mods' not in settings:
-      settings['mods'] = {'folder': os.path.join(base_folder, 'Mods')}
-      if settings['installs']['kh1.5+2.5'] is not None or settings['installs']['kh2.8'] is not None:
-         print('Modding applications to use:')
-         print()
-   if settings['installs']['kh1.5+2.5'] is not None:
-      if 'refined' not in settings['mods'] and settings['installs']['kh1.5+2.5'] is not None:
-         print('Kingdom Hearts ReFined: (y/n)')
-         settings['mods']['refined'] = os.path.join(base_folder, 'ReFined') if yes_no() else None
-         print()
-      if settings['mods']['refined'] is not None:
-         if 'refined_config' not in settings['mods']:
-            settings['mods']['refined_config'] = os.path.join(base_folder, 'reFined.cfg')
-         if 'openkh' not in settings['mods']:
-            settings['mods']['openkh'] = os.path.join(base_folder, 'OpenKH')
-      if settings['mods']['refined'] is not None:
-         if 'update_refined' not in settings['mods']:
-            settings['mods']['update_refined'] = True
-         if 'refined.vanilla_ost' not in settings['mods']:
-            print('ReFined addon: Vanilla OST toggle (y/n)')
-            settings['mods']['refined.vanilla_ost'] = yes_no()
-            print()
-         if 'refined.vanilla_enemies' not in settings['mods']:
-            print('ReFined addon: Vanilla enemies toggle (y/n)')
-            settings['mods']['refined.vanilla_enemies'] = yes_no()
-            print()
-         if 'refined.multi_audio' not in settings['mods']:
-            print('ReFined addon: Multi-language voices (y/n)')
-            settings['mods']['refined.multi_audio'] = yes_no()
-            print()
-      if 'randomizer' not in settings['mods']:
-         print('Kingdom Hearts II Randomizer: (y/n)')
-         settings['mods']['randomizer'] = os.path.join(base_folder, 'Randomizer') if yes_no() else None
-         print()
-      if settings['mods']['randomizer'] is not None:
-         if 'update_randomizer' not in settings['mods']:
-            settings['mods']['update_randomizer'] = True
-         if 'openkh' not in settings['mods']:
-            settings['mods']['openkh'] = os.path.join(base_folder, 'OpenKH')
-         if 'luabackend' not in settings['mods']:
-            settings['mods']['luabackend'] = os.path.join(base_folder, 'LuaBackend')
-         if 'luabackend_config' not in settings['mods']:
-            settings['mods']['luabackend_config'] = os.path.join(base_folder, 'LuaBackend.toml')
-   if settings['installs']['kh1.5+2.5'] is not None or settings['installs']['kh2.8'] is not None:
-      if 'openkh' not in settings['mods']:
-         print('OpenKh mod manager: (y/n)')
-         settings['mods']['openkh'] = os.path.join(base_folder, 'OpenKH') if yes_no() else None
-         print()
-      if settings['mods']['openkh'] is not None:
-         if 'update_openkh' not in settings['mods']:
-            settings['mods']['update_openkh'] = True
-         if 'update_openkh_mods' not in settings['mods']:
-            settings['mods']['update_openkh_mods'] = True
-      if settings['mods']['openkh'] is not None and 'panacea' not in settings['mods']:
-         settings['mods']['panacea'] = True
-      if settings['mods'].get('panacea') == True:
-         if 'panacea_settings' not in settings['mods']:
-            settings['mods']['panacea_settings'] = os.path.join(base_folder, 'panacea_settings.txt')
-      if 'luabackend' not in settings['mods']:
-         print('LuaBackend script loader: (y/n)')
-         settings['mods']['luabackend'] = os.path.join(base_folder, 'LuaBackend') if yes_no() else None
-         print()
-      if settings['mods']['luabackend'] is not None:
-         if 'update_luabackend' not in settings['mods']:
-            settings['mods']['update_luabackend'] = True
-         if 'luabackend_config' not in settings['mods']:
-            settings['mods']['luabackend_config'] = os.path.join(base_folder, 'LuaBackend.toml')
-
-   save_settings(settings, settings_path)
-
-   return (settings, settings != old_settings)
-
-def yes_no():
-   while True:
-      answer = input('> ')
-      if answer in ('y','Y'):
-         return True
-      if answer in ('n','N'):
-         return False
-      print('Type Y for yes, or N for no')
+               response.raise_for_status()
+            return None
+         with tempfile.TemporaryDirectory() as temp_folder:
+            temp_folder_path = pathlib.Path(temp_folder)
+            temp_zip = temp_folder_path / f'{name}.zip'
+            with open(temp_zip, 'wb') as file:
+               file.write(response.content)
+            os.makedirs(destination_folder, exist_ok=True)
+            if has_extra_folder:
+               temp_extract = temp_folder_path / name
+               os.makedirs(temp_extract, exist_ok=True)
+               pyunpack.Archive(str(temp_zip)).extractall(str(temp_extract))
+               shutil.copytree(os.path.join(temp_extract, os.listdir(temp_extract)[0]), destination_folder, dirs_exist_ok=True)
+            else:
+               pyunpack.Archive(str(temp_zip)).extractall(str(destination_folder))
+         return asset_date
+   return None
 
 if __name__ == '__main__':
    main()
