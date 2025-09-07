@@ -57,7 +57,7 @@ def main():
          cmds = ['wine']
          cmds.extend(args)
          return subprocess.run(cmds, check=True, env=dict(os.environ, WINEPREFIX=wineprefix))
-      def make_launch_linux(name, folder, has_panacea, has_luabackend):
+      def make_launch_linux(name, folder, has_panacea, has_luabackend, has_refined):
          if folder is None:
             return
          path = settings['launch'].get(name)
@@ -73,6 +73,9 @@ def main():
             dlls.append('version=n,b')
          if has_luabackend and settings['mods'].get('luabackend') is not None:
             dlls.append('dinput8=n,b')
+         if has_refined and settings['mods'].get('refined') is not None:
+            dlls.append('keystone=n,b')
+            dlls.append('newtonsoft=n,b')
          if len(dlls) > 0:
             env_vars.append(f'WINEDLLOVERRIDES="{";".join(dlls)}"')
          gameid = {'kh1':'umu-2552430','kh2':'umu-2552430','khrecom':'umu-2552430','khbbs':'umu-2552430','khddd':'umu-2552430','kh0.2':'umu-2552450','kh3':'umu-2552450','khmom':'umu-2552430'}
@@ -99,6 +102,9 @@ def main():
          print('Installing dotnet6 to wineprefix')
          subprocess.run(['winetricks', '-q', 'dotnet6'], env=dict(os.environ, WINEPREFIX=wineprefix), check=True)
          subprocess.run(['wine', 'reg', 'add', 'HKEY_CURRENT_USER\\Environment', '/f', '/v', 'DOTNET_ROOT', '/t', 'REG_SZ', '/d', 'C:\\Program Files\\dotnet'], env=dict(os.environ, WINEPREFIX=wineprefix), check=True)
+      if openkh_folder is not None and 'dotnetdesktop6' not in winetricks:
+         print('Installing dotnetdesktop6 to wineprefix')
+         subprocess.run(['winetricks', '-q', 'dotnetdesktop6'], env=dict(os.environ, WINEPREFIX=wineprefix), check=True)
       if (kh15_folder is not None or kh28_folder is not None) and 'vkd3d' not in winetricks:
          print('Installing VKD3D to wineprefix')
          subprocess.run(['winetricks', '-q', 'dxvk', 'vkd3d'], env=dict(os.environ, WINEPREFIX=wineprefix), check=True)
@@ -108,7 +114,7 @@ def main():
          return path
       def run_program_windows(args):
          return subprocess.run(args, check=True)
-      def make_launch_windows(_name, _folder, _has_panacea, _has_luabackend):
+      def make_launch_windows(_name, _folder, _has_panacea, _has_luabackend, _has_refined):
          return
       convert_path = convert_path_windows
       run_program = run_program_windows
@@ -515,14 +521,14 @@ def main():
             print('Restoring vanilla KH2 executable')
             os.rename(backup_path, kh2launch)
 
-   make_launch('kh1', kh15_folder, True, True)
-   make_launch('kh2', kh15_folder, True, True)
-   make_launch('khrecom', kh15_folder, True, True)
-   make_launch('khbbs', kh15_folder, True, True)
-   make_launch('khddd', kh28_folder, False, True)
-   make_launch('kh0.2', kh28_folder, False, False)
-   make_launch('kh3', kh3_folder, False, False)
-   make_launch('khmom', khmom_folder, False, False)
+   make_launch('kh1', kh15_folder, True, True, False)
+   make_launch('kh2', kh15_folder, True, True, True)
+   make_launch('khrecom', kh15_folder, True, True, False)
+   make_launch('khbbs', kh15_folder, True, True, False)
+   make_launch('khddd', kh28_folder, False, True, False)
+   make_launch('kh0.2', kh28_folder, False, False, False)
+   make_launch('kh3', kh3_folder, False, False, False)
+   make_launch('khmom', khmom_folder, False, False, False)
 
    with open(settings_path, 'w', encoding='utf-8') as data_file:
       yaml.dump(settings, data_file, sort_keys=False, width=1000)
