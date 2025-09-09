@@ -1,3 +1,4 @@
+import abc
 import mashumaro.codecs.yaml
 import dataclasses
 import typing
@@ -15,6 +16,9 @@ class LaunchExe:
 class KhGame:
    saves: typing.Optional[pathlib.Path]
    folder: pathlib.Path
+   @abc.abstractmethod
+   @classmethod
+   def saves_folder(cls) -> str: pass
 
 @dataclasses.dataclass
 class Kh1525(KhGame):
@@ -22,19 +26,35 @@ class Kh1525(KhGame):
    kh2: LaunchExe
    khrecom: LaunchExe
    khbbs: LaunchExe
+   
+   @classmethod
+   def saves_folder(cls) -> str:
+      return 'KINGDOM HEARTS HD 1.5+2.5 ReMIX'
 
 @dataclasses.dataclass
 class Kh28(KhGame):
    khddd: LaunchExe
    kh02: LaunchExe
+   
+   @classmethod
+   def saves_folder(cls) -> str:
+      return 'KINGDOM HEARTS HD 2.8 Final Chapter Prologue'
 
 @dataclasses.dataclass
 class Kh3(KhGame):
    kh3: LaunchExe
    
+   @classmethod
+   def saves_folder(cls) -> str:
+      return 'KINGDOM HEARTS III'
+
 @dataclasses.dataclass
 class KhMom(KhGame):
    khmom: LaunchExe
+   
+   @classmethod
+   def saves_folder(cls) -> str:
+      return 'KINGDOM HEARTS Melody of Memory'
 
 @dataclasses.dataclass
 class Games:
@@ -42,6 +62,12 @@ class Games:
    kh28: typing.Optional[Kh28]
    kh3: typing.Optional[Kh3]
    khmom: typing.Optional[KhMom]
+   
+   def get_all(self) -> list[KhGame]:
+      return [game for game in [self.kh15_25, self.kh28, self.kh3, self.khmom] if game is not None]
+
+   def get_classic(self) -> list[KhGame]:
+      return [game for game in [self.kh15_25, self.kh28] if game is not None]
 
 @dataclasses.dataclass
 class Panacea:

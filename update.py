@@ -13,7 +13,7 @@ import stat
 import platform
 import pyunpack
 import pathlib
-from settings import KhGame, Luabackend, OpenKh, Settings, get_settings, save_settings
+from settings import KhGame, Luabackend, OpenKh, Randomizer, Settings, get_settings, save_settings
 
 def main():
    settings_path = pathlib.Path(__file__).parent / 'settings.yaml'
@@ -30,14 +30,15 @@ def main():
       if settings.mods.refined is not None:
          symlinks.make(settings.games.kh15_25.folder / 'reFined.cfg', settings.mods.refined.settings, is_dir=False)
    
-   for game in [settings.games.kh15_25, settings.games.kh28]:
-      if game is not None:
-         symlinks.remove(game.folder / 'version.dll')
-         symlinks.remove(game.folder / 'DINPUT8.dll')
-         symlinks.remove(game.folder / 'DBGHELP.dll')
-         symlinks.remove(game.folder / 'LuaBackend.dll')
-         symlinks.remove(game.folder / 'LuaBackend.toml')
-         symlinks.remove(game.folder / 'panacea_settings.txt')
+   for game in settings.games.get_classic():
+      symlinks.remove(game.folder / 'version.dll')
+      symlinks.remove(game.folder / 'DINPUT8.dll')
+      symlinks.remove(game.folder / 'DBGHELP.dll')
+      symlinks.remove(game.folder / 'LuaBackend.dll')
+      symlinks.remove(game.folder / 'LuaBackend.toml')
+      symlinks.remove(game.folder / 'panacea_settings.txt')
+      if settings.mods.openkh is not None and settings.mods.openkh.panacea is not None:
+         restore_folder(game.folder / 'Image', game.folder / 'Image-BACKUP')
 
    if settings.mods.openkh is not None:
       check_openkh(settings.mods.openkh, symlinks, environment, settings, settings_path)
@@ -46,22 +47,7 @@ def main():
       check_luabackend(settings.mods.luabackend, symlinks, environment, settings, settings_path)
    
    if settings.mods.randomizer is not None:
-      randomizer = settings.mods.randomizer
-      print('Checking randomizer')
-      if (randomizer.update != False) or not randomizer.folder.exists():
-         print('Checking for randomizer updates...')
-         downloaded = download_latest(
-            last_date = randomizer.update if isinstance(randomizer.update, datetime.datetime) else None,
-            name = 'randomizer',
-            url = 'https://api.github.com/repos/tommadness/KH2Randomizer/releases/latest',
-            predicate = lambda x: x['name'] == 'Kingdom.Hearts.II.Final.Mix.Randomizer.zip',
-            has_extra_folder = False,
-            destination_folder = randomizer.folder
-         )
-         if downloaded is not None:
-            if randomizer.update != False:
-               randomizer.update = downloaded
-               save_settings(settings, settings_path)
+      check_randomizer(settings.mods.randomizer, settings, settings_path)
    
       def handle_games(kh_folder, ids):
          for gameid, txtid in ids:
@@ -180,24 +166,7 @@ def main():
                with open(toml_user, 'w', encoding='utf-8') as toml_file:
                   tomlkit.dump(toml_data, toml_file)
    
-   if kh15_folder is not None and kh2launch is not None:
-      backup_path = os.path.join(kh15_folder, 'KINGDOM HEARTS II FINAL MIX VANILLA.exe')
-      if backup_vanilla:
-         if not os.path.exists(backup_path):
-            print('Moving vanilla KH2 executable')
-            os.rename(kh2launch, backup_path)
-
-   for path in remove_symlinks:
-      if os.path.islink(path):
-         print(f'Removing symlink \'{path}\'')
-         os.remove(path)
-
-   if kh15_folder is not None and kh2launch is not None:
-      backup_path = os.path.join(kh15_folder, 'KINGDOM HEARTS II FINAL MIX VANILLA.exe')
-      if not backup_vanilla:
-         if os.path.exists(backup_path) and not os.path.exists(kh2launch):
-            print('Restoring vanilla KH2 executable')
-            os.rename(backup_path, kh2launch)
+   symlinks.commit()
 
    make_launch('kh1', kh15_folder, True, True, False)
    make_launch('kh2', kh15_folder, True, True, True)
@@ -229,7 +198,7 @@ def restore_folder(source: pathlib.Path, backup: pathlib.Path):
          shutil.copyfile(file, source / relative_name)
       shutil.rmtree(backup)
 
-class Environment(abc.ABC):
+class Environment:
    user_folder: pathlib.Path
    @abc.abstractmethod
    def convert_path(self, path: pathlib.Path) -> pathlib.Path: pass
@@ -238,7 +207,8 @@ class Environment(abc.ABC):
    @abc.abstractmethod
    def make_launch(self, name, folder, has_panacea, has_luabackend): pass
    @abc.abstractmethod
-   def is_linux(self) -> bool: pass
+   @classmethod
+   def is_linux(cls) -> bool: pass
 
 class WindowsEnvironment(Environment):
    def __init__(self):
@@ -253,7 +223,8 @@ class WindowsEnvironment(Environment):
    def make_launch(self, name, folder, has_panacea, has_luabackend):
       return
    
-   def is_linux(self) -> bool:
+   @classmethod
+   def is_linux(cls) -> bool:
       return False
 
 class LinuxEnvironment(Environment):
@@ -307,7 +278,8 @@ class LinuxEnvironment(Environment):
       st = os.stat(path)
       os.chmod(path, st.st_mode | stat.S_IEXEC)
       
-   def is_linux(self) -> bool:
+   @classmethod
+   def is_linux(cls) -> bool:
       return True
 
 def get_environment(settings: Settings) -> Environment:
@@ -354,7 +326,7 @@ def get_environment(settings: Settings) -> Environment:
             check=True,
             env=environment.wine_env
          )
-      if (settings.games.kh15_25 is not None or settings.games.kh28 is not None) and 'vkd3d' not in winetricks:
+      if (len(settings.games.get_classic()) > 0) and 'vkd3d' not in winetricks:
          # is this needed?
          print('Installing VKD3D to wineprefix')
          subprocess.run(
@@ -372,7 +344,7 @@ class Symlinks:
       self.remove_symlinks: set[pathlib.Path] = set()
    
    def remove(self, path: pathlib.Path):
-      self.symlinks.remove(path)
+      self.remove_symlinks.add(path)
       
    def make(self, new: pathlib.Path, existing: pathlib.Path, is_dir: bool):
       if new in self.remove_symlinks:
@@ -387,6 +359,8 @@ class Symlinks:
          print(f'Creating symlink in \'{new}\' pointing to \'{existing}\'')
          new.parent.mkdir(parents=True, exist_ok=True)
          new.symlink_to(existing, target_is_directory=is_dir)
+      else:
+         print(f'Can\'t create symlink in \'{new}\' pointing to \'{existing}\', file already exists!')
    
    def commit(self):
       for path in self.remove_symlinks:
@@ -394,25 +368,24 @@ class Symlinks:
             print(f'Removing symlink \'{path}\'')
             path.unlink()
 
+def handle_saves(game: KhGame, symlinks: Symlinks, environment: Environment, settings: Settings):
+   path_part = game.saves_folder()
+   if game.saves is not None:
+      game.saves.mkdir(parents=True, exist_ok=True)
+      if settings.epic_id is not None and settings.store == 'epic':
+         symlinks.make(environment.user_folder / 'Documents' / path_part / 'Epic Games Store' / str(settings.epic_id), game.saves, True)
+      if settings.steam_id is not None and settings.store == 'steam':
+         symlinks.make(environment.user_folder / 'Documents/My Games' / path_part / 'Steam' / str(settings.steam_id), game.saves, True)
+   else:
+      if settings.epic_id is not None:
+         symlinks.remove(environment.user_folder / 'Documents' / path_part / 'Epic Games Store' / str(settings.epic_id))
+      if settings.steam_id is not None:
+         symlinks.remove(environment.user_folder / 'Documents/My Games' / path_part / 'Steam' / str(settings.epic_id))
+
 def check_saves(symlinks: Symlinks, environment: Environment, settings: Settings):
    print('Checking save folders')
-   def handle_saves(game: KhGame | None, path_part: str):
-      if game is not None:
-         if game.saves is not None:
-            game.saves.mkdir(parents=True, exist_ok=True)
-            if settings.epic_id is not None and settings.store == 'epic':
-               symlinks.make(environment.user_folder / 'Documents' / path_part / 'Epic Games Store' / str(settings.epic_id), game.saves, True)
-            if settings.steam_id is not None and settings.store == 'steam':
-               symlinks.make(environment.user_folder / 'Documents/My Games' / path_part / 'Steam' / str(settings.steam_id), game.saves, True)
-         else:
-            if settings.epic_id is not None:
-               symlinks.remove(environment.user_folder / 'Documents' / path_part / 'Epic Games Store' / str(settings.epic_id))
-            if settings.steam_id is not None:
-               symlinks.remove(environment.user_folder / 'Documents/My Games' / path_part / 'Steam' / str(settings.epic_id))
-   handle_saves(settings.games.kh15_25, 'KINGDOM HEARTS HD 1.5+2.5 ReMIX')
-   handle_saves(settings.games.kh28, 'KINGDOM HEARTS HD 2.8 Final Chapter Prologue')
-   handle_saves(settings.games.kh3, 'KINGDOM HEARTS III')
-   handle_saves(settings.games.khmom, 'KINGDOM HEARTS Melody of Memory')
+   for game in settings.games.get_all():
+      handle_saves(game, symlinks, environment, settings)
    if settings.games.kh15_25 is not None:
       if (save := settings.games.kh15_25.saves) and settings.mods.refined is not None:
          symlinks.make(environment.user_folder / 'Documents/Kingdom Hearts/Configuration', save, True)
@@ -494,12 +467,11 @@ def check_openkh(openkh: OpenKh, symlinks: Symlinks, environment: Environment, s
    
    if openkh.panacea is not None:
       print('Checking panacea')
-      for game in [settings.games.kh15_25, settings.games.kh28]:
-         if game is not None:
-            dll = 'version.dll' if environment.is_linux() else 'DBGHELP.dll'
-            symlinks.make(game.folder / dll, openkh.folder / 'OpenKH.Panacea.dll', is_dir=False)
-            symlinks.make(game.folder / dll, openkh.folder / 'OpenKH.Panacea.dll', is_dir=False)
-            symlinks.make(game.folder / 'panacea_settings.txt', openkh.panacea.settings, is_dir=False)
+      for game in settings.games.get_classic():
+         dll = 'version.dll' if environment.is_linux() else 'DBGHELP.dll'
+         symlinks.make(game.folder / dll, openkh.folder / 'OpenKH.Panacea.dll', is_dir=False)
+         symlinks.make(game.folder / dll, openkh.folder / 'OpenKH.Panacea.dll', is_dir=False)
+         symlinks.make(game.folder / 'panacea_settings.txt', openkh.panacea.settings, is_dir=False)
       if not openkh.panacea.settings.exists():
          print('Creating default panacea settings')
          with open(openkh.panacea.settings, 'w', encoding='utf-8') as mods_file:
@@ -568,6 +540,23 @@ def check_luabackend(luabackend: Luabackend, symlinks: Symlinks, environment: En
       with open(luabackend.settings, 'w', encoding='utf-8') as mods_file:
          mgr_data = {}
          tomlkit.dump(mgr_data, mods_file)
+
+def check_randomizer(randomizer: Randomizer, settings: Settings, settings_path: pathlib.Path):
+   print('Checking randomizer')
+   if (randomizer.update != False) or not randomizer.folder.exists():
+      print('Checking for randomizer updates...')
+      downloaded = download_latest(
+         last_date = randomizer.update if isinstance(randomizer.update, datetime.datetime) else None,
+         name = 'randomizer',
+         url = 'https://api.github.com/repos/tommadness/KH2Randomizer/releases/latest',
+         predicate = lambda x: x['name'] == 'Kingdom.Hearts.II.Final.Mix.Randomizer.zip',
+         has_extra_folder = False,
+         destination_folder = randomizer.folder
+      )
+      if downloaded is not None:
+         if randomizer.update != False:
+            randomizer.update = downloaded
+            save_settings(settings, settings_path)
 
 def download_latest(
    last_date: datetime.datetime | None,
