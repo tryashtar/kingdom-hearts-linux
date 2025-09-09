@@ -13,294 +13,56 @@ import stat
 import platform
 import pyunpack
 import pathlib
-from settings import KhGame, Settings, get_settings, save_settings
+from settings import KhGame, Luabackend, OpenKh, Settings, get_settings, save_settings
 
 def main():
    settings_path = pathlib.Path(__file__).parent / 'settings.yaml'
    settings = get_settings(settings_path)
    print('Starting!')
 
-   remove_symlinks: set[pathlib.Path] = set()
-   def make_symlink(new: pathlib.Path, existing: pathlib.Path, is_dir: bool):
-      if new in remove_symlinks:
-         remove_symlinks.remove(new)
-      if new.is_symlink():
-         target = new.readlink()
-         if target == existing:
-            return
-         print(f'Removing previous symlink in \'{new}\' pointing to \'{target}\'')
-         new.unlink()
-      if not new.exists():
-         print(f'Creating symlink in \'{new}\' pointing to \'{existing}\'')
-         new.parent.mkdir(parents=True, exist_ok=True)
-         new.symlink_to(existing, target_is_directory=is_dir)
-
-   is_linux = platform.system() == 'Linux'
+   symlinks = Symlinks()
+   environment = get_environment(settings)
    
-   if is_linux:
-      print('Linux detected')
-      assert settings.wineprefix is not None
-      environment = LinuxEnvironment(settings)
-      # should we do steamuser?
-      if not environment.user_folder.exists():
-         print('Creating wineprefix')
-         subprocess.run(
-            ['wineboot'],
-            check=True,
-            env=environment.wine_env
-         )
-         docs_folder = environment.user_folder / 'Documents'
-         if docs_folder.is_symlink():
-            print('Unlinking new documents folder')
-            docs_folder.unlink()
-      winetricks: list[str] = []
-      winetricks_log = settings.wineprefix / 'winetricks.log'
-      if winetricks_log.exists():
-         with open(winetricks_log, 'r', encoding='utf-8') as winetricks_file:
-            winetricks = [line.rstrip('\n') for line in winetricks_file]
-      if settings.mods.openkh is not None and 'dotnet6' not in winetricks:
-         # is this needed?
-         print('Installing dotnet6 to wineprefix')
-         subprocess.run(
-            ['winetricks', '-q', 'dotnet6'],
-            check=True,
-            env=environment.wine_env
-         )
-         subprocess.run(
-            ['wine', 'reg', 'add', 'HKEY_CURRENT_USER\\Environment', '/f', '/v', 'DOTNET_ROOT', '/t', 'REG_SZ', '/d', 'C:\\Program Files\\dotnet'],
-            check=True,
-            env=environment.wine_env
-         )
-      if settings.mods.openkh is not None and 'dotnetdesktop6' not in winetricks:
-         # is this needed?
-         print('Installing dotnetdesktop6 to wineprefix')
-         subprocess.run(
-            ['winetricks', '-q', 'dotnetdesktop6'],
-            check=True,
-            env=environment.wine_env
-         )
-      if (settings.games.kh15_25 is not None or settings.games.kh28 is not None) and 'vkd3d' not in winetricks:
-         # is this needed?
-         print('Installing VKD3D to wineprefix')
-         subprocess.run(
-            ['winetricks', '-q', 'dxvk', 'vkd3d'],
-            check=True,
-            env=environment.wine_env
-         )
-   else:
-      print('Windows detected')
-      environment = WindowsEnvironment()
-   
-   def handle_saves(game: KhGame | None, path_part: str):
-      if game is not None:
-         if game.saves is not None:
-            game.saves.mkdir(parents=True, exist_ok=True)
-            if settings.epic_id is not None and settings.store == 'epic':
-               make_symlink(environment.user_folder / 'Documents' / path_part / 'Epic Games Store' / str(settings.epic_id), game.saves, True)
-            if settings.steam_id is not None and settings.store == 'steam':
-               make_symlink(environment.user_folder / 'Documents/My Games' / path_part / 'Steam' / str(settings.steam_id), game.saves, True)
-         else:
-            if settings.epic_id is not None:
-               remove_symlinks.add(environment.user_folder / 'Documents' / path_part / 'Epic Games Store' / str(settings.epic_id))
-            if settings.steam_id is not None:
-               remove_symlinks.add(environment.user_folder / 'Documents/My Games' / path_part / 'Steam' / str(settings.epic_id))
-   
-   print('Checking save folders')
-   handle_saves(settings.games.kh15_25, 'KINGDOM HEARTS HD 1.5+2.5 ReMIX')
-   handle_saves(settings.games.kh28, 'KINGDOM HEARTS HD 2.8 Final Chapter Prologue')
-   handle_saves(settings.games.kh3, 'KINGDOM HEARTS III')
-   handle_saves(settings.games.khmom, 'KINGDOM HEARTS Melody of Memory')
-   if settings.games.kh15_25 is not None:
-      if (save := settings.games.kh15_25.saves) and settings.mods.refined is not None:
-         make_symlink(environment.user_folder / 'Documents/Kingdom Hearts/Configuration', save, True)
-         make_symlink(environment.user_folder / 'Documents/Kingdom Hearts/Save Data', save, True)
-      else:
-         remove_symlinks.add(environment.user_folder / 'Documents/Kingdom Hearts/Configuration')
-         remove_symlinks.add(environment.user_folder / 'Documents/Kingdom Hearts/Save Data')
+   check_saves(symlinks, environment, settings)
    
    if settings.games.kh15_25 is not None:
-      remove_symlinks.add(settings.games.kh15_25.folder / 'reFined.cfg')
+      symlinks.remove(settings.games.kh15_25.folder / 'reFined.cfg')
+      if settings.mods.refined is not None:
+         symlinks.make(settings.games.kh15_25.folder / 'reFined.cfg', settings.mods.refined.settings, is_dir=False)
    
    for game in [settings.games.kh15_25, settings.games.kh28]:
       if game is not None:
-         game: KhGame
-         remove_symlinks.add(game.folder / 'version.dll')
-         remove_symlinks.add(game.folder / 'DINPUT8.dll')
-         remove_symlinks.add(game.folder / 'DBGHELP.dll')
-         remove_symlinks.add(game.folder / 'LuaBackend.dll')
-         remove_symlinks.add(game.folder / 'lua54.dll')
-         remove_symlinks.add(game.folder / 'LuaBackend.toml')
-         remove_symlinks.add(game.folder / 'panacea_settings.txt')
+         symlinks.remove(game.folder / 'version.dll')
+         symlinks.remove(game.folder / 'DINPUT8.dll')
+         symlinks.remove(game.folder / 'DBGHELP.dll')
+         symlinks.remove(game.folder / 'LuaBackend.dll')
+         symlinks.remove(game.folder / 'LuaBackend.toml')
+         symlinks.remove(game.folder / 'panacea_settings.txt')
 
    if settings.mods.openkh is not None:
-      print('Checking OpenKh')
-      default_manager_settings = settings.mods.openkh.folder / 'mods-manager.yml'
-      manager_settings = settings.mods.openkh.settings if settings.mods.openkh.settings is not None else default_manager_settings
-      if (settings.mods.openkh.update != False) or not settings.mods.openkh.folder.exists():
-         print('Checking for OpenKh updates...')
+      check_openkh(settings.mods.openkh, symlinks, environment, settings, settings_path)
+
+   if settings.mods.luabackend is not None:
+      check_luabackend(settings.mods.luabackend, symlinks, environment, settings, settings_path)
+   
+   if settings.mods.randomizer is not None:
+      randomizer = settings.mods.randomizer
+      print('Checking randomizer')
+      if (randomizer.update != False) or not randomizer.folder.exists():
+         print('Checking for randomizer updates...')
          downloaded = download_latest(
-            last_date = settings.mods.openkh.update if isinstance(settings.mods.openkh.update, datetime.datetime) else None,
-            name = 'openkh',
-            url = 'https://api.github.com/repos/OpenKH/OpenKh/releases/tags/latest',
-            predicate = lambda x: x['name'] == 'openkh.zip',
-            has_extra_folder = True,
-            destination_folder = settings.mods.openkh.folder
+            last_date = randomizer.update if isinstance(randomizer.update, datetime.datetime) else None,
+            name = 'randomizer',
+            url = 'https://api.github.com/repos/tommadness/KH2Randomizer/releases/latest',
+            predicate = lambda x: x['name'] == 'Kingdom.Hearts.II.Final.Mix.Randomizer.zip',
+            has_extra_folder = False,
+            destination_folder = randomizer.folder
          )
          if downloaded is not None:
-            if settings.mods.openkh.update != False:
-               settings.mods.openkh.update = downloaded
+            if randomizer.update != False:
+               randomizer.update = downloaded
                save_settings(settings, settings_path)
-            if not manager_settings.exists():
-               print('Creating default mod manager configuration')
-               with open(manager_settings, 'w', encoding='utf-8') as mods_file:
-                  data = {
-                     'wizardVersionNumber': 1,
-                     'gameEdition': 2,
-                  }
-                  yaml.dump(data, mods_file)
-      print('Checking mod manager configuration')
-      remove_symlinks.add(default_manager_settings)
-      if settings.mods.openkh.settings is not None:
-         make_symlink(default_manager_settings, settings.mods.openkh.settings, is_dir=True)
-      remove_symlinks.add(settings.mods.openkh.folder / 'mods-KH1.txt')
-      remove_symlinks.add(settings.mods.openkh.folder / 'mods-KH2.txt')
-      remove_symlinks.add(settings.mods.openkh.folder / 'mods-BBS.txt')
-      remove_symlinks.add(settings.mods.openkh.folder / 'mods-ReCoM.txt')
-      remove_symlinks.add(settings.mods.openkh.folder / 'mods-KH3D.txt')
-      remove_symlinks.add(settings.mods.openkh.folder / 'collection-mods-KH1.json')
-      remove_symlinks.add(settings.mods.openkh.folder / 'collection-mods-KH2.json')
-      remove_symlinks.add(settings.mods.openkh.folder / 'collection-mods-BBS.json')
-      remove_symlinks.add(settings.mods.openkh.folder / 'collection-mods-ReCoM.json')
-      remove_symlinks.add(settings.mods.openkh.folder / 'collection-mods-KH3D.json')
-      if settings.mods.openkh.mods is not None:
-         if settings.games.kh15_25 is not None:
-            make_symlink(settings.mods.openkh.folder / 'mods-KH1.txt', settings.mods.openkh.mods / 'kh1.txt', is_dir=False)
-            make_symlink(settings.mods.openkh.folder / 'mods-KH2.txt', settings.mods.openkh.mods / 'kh2.txt', is_dir=False)
-            make_symlink(settings.mods.openkh.folder / 'mods-BBS.txt', settings.mods.openkh.mods / 'bbs.txt', is_dir=False)
-            make_symlink(settings.mods.openkh.folder / 'mods-ReCoM.txt', settings.mods.openkh.mods / 'Recom.txt', is_dir=False)
-            make_symlink(settings.mods.openkh.folder / 'collection-mods-KH1.json', settings.mods.openkh.mods / 'kh1-collection.json', is_dir=False)
-            make_symlink(settings.mods.openkh.folder / 'collection-mods-KH2.json', settings.mods.openkh.mods / 'kh2-collection.json', is_dir=False)
-            make_symlink(settings.mods.openkh.folder / 'collection-mods-BBS.json', settings.mods.openkh.mods / 'bbs-collection.json', is_dir=False)
-            make_symlink(settings.mods.openkh.folder / 'collection-mods-ReCoM.json', settings.mods.openkh.mods / 'Recom-collection.json', is_dir=False)
-         if settings.games.kh28 is not None:
-            make_symlink(settings.mods.openkh.folder / 'mods-KH3D.txt', settings.mods.openkh.mods / 'kh3d.txt', is_dir=False)
-            make_symlink(settings.mods.openkh.folder / 'collection-mods-KH3D.json', settings.mods.openkh.mods / 'kh3d-collection.json', is_dir=False)
-
-      with open(manager_settings, 'r', encoding='utf-8') as mods_file:
-         data = yaml.load(mods_file, yaml.CLoader)
-      changed = False
-      if settings.mods.openkh.mods is not None:
-         changed |= set_data(data, 'modCollectionPath', environment.convert_path(settings.mods.openkh.mods))
-         changed |= set_data(data, 'modCollectionsPath', environment.convert_path(settings.mods.openkh.mods / 'collections'))
-         changed |= set_data(data, 'gameModPath', environment.convert_path(settings.mods.openkh.mods / 'output'))
-      changed |= set_data(data, 'panaceaInstalled', settings.mods.openkh.panacea is not None)
-      changed |= set_data(data, 'pcVersion', {'steam': 'Steam', 'epic': 'EGS'}[settings.store])
-      if settings.games.kh15_25 is not None:
-         changed |= set_data(data, 'pcReleaseLocation', environment.convert_path(settings.games.kh15_25.folder))
-      if settings.games.kh28 is not None:
-         changed |= set_data(data, 'pcReleaseLocationKH3D', environment.convert_path(settings.games.kh28.folder))
-      if changed:
-         with open(manager_settings, 'w', encoding='utf-8') as mods_file:
-            yaml.dump(data, mods_file)
-      
-      if settings.mods.openkh.panacea is not None:
-         print('Checking panacea')
-         for game in [settings.games.kh15_25, settings.games.kh28]:
-            if game is not None:
-               game: KhGame
-               dll = 'version.dll' if is_linux else 'DBGHELP.dll'
-               make_symlink(game.folder / dll, settings.mods.openkh.folder / 'OpenKH.Panacea.dll', is_dir=False)
-               make_symlink(game.folder / dll, settings.mods.openkh.folder / 'OpenKH.Panacea.dll', is_dir=False)
-               make_symlink(game.folder / 'panacea_settings.txt', settings.mods.openkh.panacea.settings, is_dir=False)
-         if not settings.mods.openkh.panacea.settings.exists():
-            print('Creating default panacea settings')
-            with open(settings.mods.openkh.panacea.settings, 'w', encoding='utf-8') as mods_file:
-               mods_file.writelines([
-                  'show_console=False\n'
-               ])
-         with open(settings.mods.openkh.panacea.settings, 'r', encoding='utf-8') as mods_file:
-            data = {key: value for key, value in [line.rstrip('\n').split('=', 1) for line in mods_file.readlines()]}
-         changed = False
-         path = settings.mods.openkh.mods / 'output' if settings.mods.openkh.mods is not None else settings.mods.openkh.folder / 'mod'
-         changed |= set_data(data, 'mod_path', environment.convert_path(path))
-         if changed:
-            with open(settings.mods.openkh.panacea.settings, 'r', encoding='utf-8') as mods_file:
-               mods_file.writelines([f'{key}={value}\n' for key, value in data.items()])
-
-      def download_mod(game, repo):
-         if openkh_folder is None:
-            return
-         patch_folder = os.path.join(mods_folder, game, repo)
-         if game not in mod_changes:
-            mod_changes[game] = {}
-         if not os.path.exists(patch_folder):
-            print(f'Downloading mod {repo}')
-            subprocess.run(['git', 'clone', f'https://github.com/{repo}', '--recurse-submodules', patch_folder], check=True)
-            mod_changes[game][repo] = True
-         else:
-            del mod_changes[game][repo]
-
-      mod_changes = {'kh2':{'KH2FM-Mods-Num/GoA-ROM-Edition': False, 'KH-ReFined/KH2-VanillaOST': False, 'KH-ReFined/KH2-VanillaEnemy': False, 'KH-ReFined/KH2-MultiAudio': False, 'KH-ReFined/KH2-MAIN': False}}
-            if (refined_folder := settings['mods'].get('refined')) is not None:
-         if settings['mods']['update_refined'] == True or not os.path.exists(refined_folder):
-            print('Checking for ReFined updates...')
-            download_latest(settings, settings_path, 'refined', 'https://api.github.com/repos/KH-ReFined/KH-ReFined/releases', lambda x: x['name'].endswith('.zip') or x['name'].endswith('.rar'), False, refined_folder)
-            download_mod('kh2', 'KH-ReFined/KH2-MAIN')
-            if settings['mods'].get('refined.vanilla_ost') == True:
-               download_mod('kh2', 'KH-ReFined/KH2-VanillaOST')
-            if settings['mods'].get('refined.vanilla_enemies') == True:
-               download_mod('kh2', 'KH-ReFined/KH2-VanillaEnemy')
-            if settings['mods'].get('refined.multi_audio') == True:
-               download_mod('kh2', 'KH-ReFined/KH2-MultiAudio')
-         else:
-            del mod_changes['kh2']['KH-ReFined/KH2-VanillaOST']
-            del mod_changes['kh2']['KH-ReFined/KH2-VanillaEnemy']
-            del mod_changes['kh2']['KH-ReFined/KH2-MultiAudio']
-            del mod_changes['kh2']['KH-ReFined/KH2-MAIN']
-         if kh15_folder is not None:
-            if os.path.exists(os.path.join(refined_folder, 'x64')):
-               make_symlink(os.path.join(kh15_folder, 'x64'), os.path.join(refined_folder, 'x64'), True)
-            if os.path.exists(os.path.join(refined_folder, 'Keystone.Net.dll')):
-               make_symlink(os.path.join(kh15_folder, 'Keystone.Net.dll'), os.path.join(refined_folder, 'Keystone.Net.dll'), False)
-            if os.path.exists(os.path.join(refined_folder, 'keystone.dll')):
-               make_symlink(os.path.join(kh15_folder, 'keystone.dll'), os.path.join(refined_folder, 'keystone.dll'), False)
-            if os.path.exists(os.path.join(refined_folder, 'Newtonsoft.Json.dll')):
-               make_symlink(os.path.join(kh15_folder, 'Newtonsoft.Json.dll'), os.path.join(refined_folder, 'Keystone.Net.dll'), False)
-            if os.path.exists(os.path.join(refined_folder, 'ViGEmClient.dll')):
-               make_symlink(os.path.join(kh15_folder, 'ViGEmClient.dll'), os.path.join(refined_folder, 'ViGEmClient.dll'), False)
-            if os.path.exists(os.path.join(refined_folder, 'System.Runtime.CompilerServices.Unsafe.dll')):
-               make_symlink(os.path.join(kh15_folder, 'System.Runtime.CompilerServices.Unsafe.dll'), os.path.join(refined_folder, 'System.Runtime.CompilerServices.Unsafe.dll'), False)
-            if kh2launch is not None:
-               make_symlink(kh2launch, os.path.join(refined_folder, 'KINGDOM HEARTS II FINAL MIX.exe'), False)
-            if (refined_ini := settings['mods'].get('refined_config')) is not None:
-               make_symlink(os.path.join(kh15_folder, 'reFined.cfg'), refined_ini, False)
-            backup_vanilla = True
-
-
-      if (randomizer_folder := settings['mods'].get('randomizer')) is not None:
-         if settings['mods']['update_randomizer'] == True or not os.path.exists(randomizer_folder):
-            print('Checking for Randomizer updates...')
-            download_latest(settings, settings_path, 'randomizer', 'https://api.github.com/repos/tommadness/KH2Randomizer/releases/latest', lambda x: x['name'] == 'Kingdom.Hearts.II.Final.Mix.Randomizer.zip', False, randomizer_folder)
-            download_mod('kh2', 'KH2FM-Mods-Num/GoA-ROM-Edition')
-         else:
-            del mod_changes['kh2']['KH2FM-Mods-Num/GoA-ROM-Edition']
-
-      rebuild = set()
-      if settings['mods']['update_openkh_mods'] == True:
-         if os.path.exists(mods_folder):
-            for game in next(os.walk(mods_folder))[1]:
-               for mod_dir in [os.path.join(dp, f) for dp, dn, _ in os.walk(os.path.join(mods_folder, game)) for f in dn]:
-                  if os.path.exists(os.path.join(mod_dir, '.git')):
-                     print(f'Checking for updates for mod {os.path.basename(mod_dir)}')
-                     old_hash = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=mod_dir, check=True, stdout=subprocess.PIPE).stdout
-                     subprocess.run(['git', 'pull', '--recurse-submodules'], cwd=mod_dir, check=True)
-                     new_hash = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=mod_dir, check=True, stdout=subprocess.PIPE).stdout
-                     if old_hash != new_hash:
-                        rebuild.add(game)
-      if 'last_build' not in settings:
-         settings['last_build'] = {}
-      enabled_mods = {}
-
+   
       def handle_games(kh_folder, ids):
          for gameid, txtid in ids:
             enabled_mods_path = os.path.join(openkh_folder, f'mods-{txtid}.txt')
@@ -356,12 +118,6 @@ def main():
          handle_games(kh15_folder, [('kh1', 'KH1'), ('kh2', 'KH2'), ('bbs', 'BBS'), ('Recom', 'ReCoM')])
       if kh28_folder is not None:
          handle_games(kh28_folder, [('kh3d', 'KH3D')])
-
-   else:
-      if kh15_folder is not None:
-         restore_folder(kh15_folder)
-      if kh28_folder is not None:
-         restore_folder(kh28_folder)
    
    if (lua_folder := settings['mods'].get('luabackend')) is not None:
       if settings['mods']['update_luabackend'] == True or not os.path.exists(lua_folder):
@@ -383,15 +139,15 @@ def main():
          if folder is None:
             continue
          if is_linux:
-            make_symlink(os.path.join(folder, 'DINPUT8.dll'), os.path.join(lua_folder, 'DBGHELP.dll'), False)
+            symlinks.make(os.path.join(folder, 'DINPUT8.dll'), os.path.join(lua_folder, 'DBGHELP.dll'), False)
          else:
             if openkh_folder is not None:
-               make_symlink(os.path.join(folder, 'LuaBackend.dll'), os.path.join(lua_folder, 'DBGHELP.dll'), False)
+               symlinks.make(os.path.join(folder, 'LuaBackend.dll'), os.path.join(lua_folder, 'DBGHELP.dll'), False)
             else:
-               make_symlink(os.path.join(folder, 'DBGHELP.dll'), os.path.join(lua_folder, 'DBGHELP.dll'), False)
-         make_symlink(os.path.join(folder, 'lua54.dll'), os.path.join(lua_folder, 'lua54.dll'), False)
+               symlinks.make(os.path.join(folder, 'DBGHELP.dll'), os.path.join(lua_folder, 'DBGHELP.dll'), False)
+         symlinks.make(os.path.join(folder, 'lua54.dll'), os.path.join(lua_folder, 'lua54.dll'), False)
          if toml_user is not None:
-            make_symlink(os.path.join(folder, 'LuaBackend.toml'), toml_user, False)
+            symlinks.make(os.path.join(folder, 'LuaBackend.toml'), toml_user, False)
       if openkh_folder is not None:
          for folder in [kh15_folder, kh28_folder]:
             if folder is None:
@@ -474,12 +230,15 @@ def restore_folder(source: pathlib.Path, backup: pathlib.Path):
       shutil.rmtree(backup)
 
 class Environment(abc.ABC):
+   user_folder: pathlib.Path
    @abc.abstractmethod
    def convert_path(self, path: pathlib.Path) -> pathlib.Path: pass
    @abc.abstractmethod
    def run_program(self, args: list[str]) -> subprocess.CompletedProcess: pass
    @abc.abstractmethod
    def make_launch(self, name, folder, has_panacea, has_luabackend): pass
+   @abc.abstractmethod
+   def is_linux(self) -> bool: pass
 
 class WindowsEnvironment(Environment):
    def __init__(self):
@@ -493,6 +252,9 @@ class WindowsEnvironment(Environment):
    
    def make_launch(self, name, folder, has_panacea, has_luabackend):
       return
+   
+   def is_linux(self) -> bool:
+      return False
 
 class LinuxEnvironment(Environment):
    def __init__(self, settings: Settings):
@@ -544,6 +306,268 @@ class LinuxEnvironment(Environment):
          sh_file.write(f'#!/bin/sh\ncd "{folder}" || exit 1\n{" ".join(env_vars)} exec umu-run "{exe}"\n')
       st = os.stat(path)
       os.chmod(path, st.st_mode | stat.S_IEXEC)
+      
+   def is_linux(self) -> bool:
+      return True
+
+def get_environment(settings: Settings) -> Environment:
+   is_linux = platform.system() == 'Linux'
+   if is_linux:
+      print('Linux detected')
+      assert settings.wineprefix is not None
+      environment = LinuxEnvironment(settings)
+      # should we do steamuser?
+      if not environment.user_folder.exists():
+         print('Creating wineprefix')
+         subprocess.run(
+            ['wineboot'],
+            check=True,
+            env=environment.wine_env
+         )
+         docs_folder = environment.user_folder / 'Documents'
+         if docs_folder.is_symlink():
+            print('Unlinking new documents folder')
+            docs_folder.unlink()
+      winetricks: list[str] = []
+      winetricks_log = settings.wineprefix / 'winetricks.log'
+      if winetricks_log.exists():
+         with open(winetricks_log, 'r', encoding='utf-8') as winetricks_file:
+            winetricks = [line.rstrip('\n') for line in winetricks_file]
+      if settings.mods.openkh is not None and 'dotnet6' not in winetricks:
+         # is this needed?
+         print('Installing dotnet6 to wineprefix')
+         subprocess.run(
+            ['winetricks', '-q', 'dotnet6'],
+            check=True,
+            env=environment.wine_env
+         )
+         subprocess.run(
+            ['wine', 'reg', 'add', 'HKEY_CURRENT_USER\\Environment', '/f', '/v', 'DOTNET_ROOT', '/t', 'REG_SZ', '/d', 'C:\\Program Files\\dotnet'],
+            check=True,
+            env=environment.wine_env
+         )
+      if settings.mods.openkh is not None and 'dotnetdesktop6' not in winetricks:
+         # is this needed?
+         print('Installing dotnetdesktop6 to wineprefix')
+         subprocess.run(
+            ['winetricks', '-q', 'dotnetdesktop6'],
+            check=True,
+            env=environment.wine_env
+         )
+      if (settings.games.kh15_25 is not None or settings.games.kh28 is not None) and 'vkd3d' not in winetricks:
+         # is this needed?
+         print('Installing VKD3D to wineprefix')
+         subprocess.run(
+            ['winetricks', '-q', 'dxvk', 'vkd3d'],
+            check=True,
+            env=environment.wine_env
+         )
+      return environment
+   else:
+      print('Windows detected')
+      return WindowsEnvironment()
+
+class Symlinks:
+   def __init__(self):
+      self.remove_symlinks: set[pathlib.Path] = set()
+   
+   def remove(self, path: pathlib.Path):
+      self.symlinks.remove(path)
+      
+   def make(self, new: pathlib.Path, existing: pathlib.Path, is_dir: bool):
+      if new in self.remove_symlinks:
+         self.remove_symlinks.remove(new)
+      if new.is_symlink():
+         target = new.readlink()
+         if target == existing:
+            return
+         print(f'Removing previous symlink in \'{new}\' pointing to \'{target}\'')
+         new.unlink()
+      if not new.exists():
+         print(f'Creating symlink in \'{new}\' pointing to \'{existing}\'')
+         new.parent.mkdir(parents=True, exist_ok=True)
+         new.symlink_to(existing, target_is_directory=is_dir)
+   
+   def commit(self):
+      for path in self.remove_symlinks:
+         if path.is_symlink():
+            print(f'Removing symlink \'{path}\'')
+            path.unlink()
+
+def check_saves(symlinks: Symlinks, environment: Environment, settings: Settings):
+   print('Checking save folders')
+   def handle_saves(game: KhGame | None, path_part: str):
+      if game is not None:
+         if game.saves is not None:
+            game.saves.mkdir(parents=True, exist_ok=True)
+            if settings.epic_id is not None and settings.store == 'epic':
+               symlinks.make(environment.user_folder / 'Documents' / path_part / 'Epic Games Store' / str(settings.epic_id), game.saves, True)
+            if settings.steam_id is not None and settings.store == 'steam':
+               symlinks.make(environment.user_folder / 'Documents/My Games' / path_part / 'Steam' / str(settings.steam_id), game.saves, True)
+         else:
+            if settings.epic_id is not None:
+               symlinks.remove(environment.user_folder / 'Documents' / path_part / 'Epic Games Store' / str(settings.epic_id))
+            if settings.steam_id is not None:
+               symlinks.remove(environment.user_folder / 'Documents/My Games' / path_part / 'Steam' / str(settings.epic_id))
+   handle_saves(settings.games.kh15_25, 'KINGDOM HEARTS HD 1.5+2.5 ReMIX')
+   handle_saves(settings.games.kh28, 'KINGDOM HEARTS HD 2.8 Final Chapter Prologue')
+   handle_saves(settings.games.kh3, 'KINGDOM HEARTS III')
+   handle_saves(settings.games.khmom, 'KINGDOM HEARTS Melody of Memory')
+   if settings.games.kh15_25 is not None:
+      if (save := settings.games.kh15_25.saves) and settings.mods.refined is not None:
+         symlinks.make(environment.user_folder / 'Documents/Kingdom Hearts/Configuration', save, True)
+         symlinks.make(environment.user_folder / 'Documents/Kingdom Hearts/Save Data', save, True)
+      else:
+         symlinks.remove(environment.user_folder / 'Documents/Kingdom Hearts/Configuration')
+         symlinks.remove(environment.user_folder / 'Documents/Kingdom Hearts/Save Data')
+
+def check_openkh(openkh: OpenKh, symlinks: Symlinks, environment: Environment, settings: Settings, settings_path: pathlib.Path):
+   print('Checking OpenKh')
+   default_manager_settings = openkh.folder / 'mods-manager.yml'
+   manager_settings = openkh.settings if openkh.settings is not None else default_manager_settings
+   if (openkh.update != False) or not openkh.folder.exists():
+      print('Checking for OpenKh updates...')
+      downloaded = download_latest(
+         last_date = openkh.update if isinstance(openkh.update, datetime.datetime) else None,
+         name = 'openkh',
+         url = 'https://api.github.com/repos/OpenKH/OpenKh/releases/tags/latest',
+         predicate = lambda x: x['name'] == 'openkh.zip',
+         has_extra_folder = True,
+         destination_folder = openkh.folder
+      )
+      if downloaded is not None:
+         if openkh.update != False:
+            openkh.update = downloaded
+            save_settings(settings, settings_path)
+
+   print('Checking mod manager configuration')
+   symlinks.remove(default_manager_settings)
+   if openkh.settings is not None:
+      symlinks.make(default_manager_settings, openkh.settings, is_dir=True)
+   symlinks.remove(openkh.folder / 'mods-KH1.txt')
+   symlinks.remove(openkh.folder / 'mods-KH2.txt')
+   symlinks.remove(openkh.folder / 'mods-BBS.txt')
+   symlinks.remove(openkh.folder / 'mods-ReCoM.txt')
+   symlinks.remove(openkh.folder / 'mods-KH3D.txt')
+   symlinks.remove(openkh.folder / 'collection-mods-KH1.json')
+   symlinks.remove(openkh.folder / 'collection-mods-KH2.json')
+   symlinks.remove(openkh.folder / 'collection-mods-BBS.json')
+   symlinks.remove(openkh.folder / 'collection-mods-ReCoM.json')
+   symlinks.remove(openkh.folder / 'collection-mods-KH3D.json')
+   if openkh.mods is not None:
+      if settings.games.kh15_25 is not None:
+         symlinks.make(openkh.folder / 'mods-KH1.txt', openkh.mods / 'kh1.txt', is_dir=False)
+         symlinks.make(openkh.folder / 'mods-KH2.txt', openkh.mods / 'kh2.txt', is_dir=False)
+         symlinks.make(openkh.folder / 'mods-BBS.txt', openkh.mods / 'bbs.txt', is_dir=False)
+         symlinks.make(openkh.folder / 'mods-ReCoM.txt', openkh.mods / 'Recom.txt', is_dir=False)
+         symlinks.make(openkh.folder / 'collection-mods-KH1.json', openkh.mods / 'kh1-collection.json', is_dir=False)
+         symlinks.make(openkh.folder / 'collection-mods-KH2.json', openkh.mods / 'kh2-collection.json', is_dir=False)
+         symlinks.make(openkh.folder / 'collection-mods-BBS.json', openkh.mods / 'bbs-collection.json', is_dir=False)
+         symlinks.make(openkh.folder / 'collection-mods-ReCoM.json', openkh.mods / 'Recom-collection.json', is_dir=False)
+      if settings.games.kh28 is not None:
+         symlinks.make(openkh.folder / 'mods-KH3D.txt', openkh.mods / 'kh3d.txt', is_dir=False)
+         symlinks.make(openkh.folder / 'collection-mods-KH3D.json', openkh.mods / 'kh3d-collection.json', is_dir=False)
+   if not manager_settings.exists():
+      print('Creating default mod manager configuration')
+      with open(manager_settings, 'w', encoding='utf-8') as mods_file:
+         mgr_data = {
+            'wizardVersionNumber': 1,
+            'gameEdition': 2,
+         }
+         yaml.dump(mgr_data, mods_file)
+   with open(manager_settings, 'r', encoding='utf-8') as mods_file:
+      mgr_data = yaml.load(mods_file, yaml.CLoader)
+   changed = False
+   if openkh.mods is not None:
+      changed |= set_data(mgr_data, 'modCollectionPath', environment.convert_path(openkh.mods))
+      changed |= set_data(mgr_data, 'modCollectionsPath', environment.convert_path(openkh.mods / 'collections'))
+      changed |= set_data(mgr_data, 'gameModPath', environment.convert_path(openkh.mods / 'output'))
+   changed |= set_data(mgr_data, 'panaceaInstalled', openkh.panacea is not None)
+   changed |= set_data(mgr_data, 'pcVersion', {'steam': 'Steam', 'epic': 'EGS'}[settings.store])
+   if settings.games.kh15_25 is not None:
+      changed |= set_data(mgr_data, 'pcReleaseLocation', environment.convert_path(settings.games.kh15_25.folder))
+   if settings.games.kh28 is not None:
+      changed |= set_data(mgr_data, 'pcReleaseLocationKH3D', environment.convert_path(settings.games.kh28.folder))
+   if changed:
+      with open(manager_settings, 'w', encoding='utf-8') as mods_file:
+         yaml.dump(mgr_data, mods_file)
+   
+   if openkh.panacea is not None:
+      print('Checking panacea')
+      for game in [settings.games.kh15_25, settings.games.kh28]:
+         if game is not None:
+            dll = 'version.dll' if environment.is_linux() else 'DBGHELP.dll'
+            symlinks.make(game.folder / dll, openkh.folder / 'OpenKH.Panacea.dll', is_dir=False)
+            symlinks.make(game.folder / dll, openkh.folder / 'OpenKH.Panacea.dll', is_dir=False)
+            symlinks.make(game.folder / 'panacea_settings.txt', openkh.panacea.settings, is_dir=False)
+      if not openkh.panacea.settings.exists():
+         print('Creating default panacea settings')
+         with open(openkh.panacea.settings, 'w', encoding='utf-8') as mods_file:
+            mods_file.writelines([
+               'show_console=False\n'
+            ])
+      with open(openkh.panacea.settings, 'r', encoding='utf-8') as mods_file:
+         pana_data = dict(line.rstrip('\n').split('=', 1) for line in mods_file.readlines())
+      changed = False
+      path = mgr_data.get('gameModPath', openkh.folder / 'mod')
+      changed |= set_data(pana_data, 'mod_path', environment.convert_path(path))
+      if changed:
+         with open(openkh.panacea.settings, 'r', encoding='utf-8') as mods_file:
+            mods_file.writelines([f'{key}={value}\n' for key, value in pana_data.items()])
+            
+   if openkh.update_mods:
+      print('Updating mods')
+      rebuild: set[str] = set()
+      mods_folder = openkh.mods if openkh.mods is not None else openkh.folder / 'mods'
+      if mods_folder.exists():
+         for game in mods_folder.iterdir():
+            if game.is_dir():
+               for root, folders, _files in game.walk():
+                  if '.git' in folders:
+                     print(f'Checking for updates for mod {root.name}')
+                     old_hash = subprocess.run(
+                        ['git', 'rev-parse', 'HEAD'],
+                        cwd=root,
+                        check=True,
+                        stdout=subprocess.PIPE
+                     ).stdout
+                     subprocess.run(
+                        ['git', 'pull', '--recurse-submodules'],
+                        cwd=root,
+                        check=True
+                     )
+                     new_hash = subprocess.run(
+                        ['git', 'rev-parse', 'HEAD'],
+                        cwd=root,
+                        check=True,
+                        stdout=subprocess.PIPE
+                     ).stdout
+                     if old_hash != new_hash:
+                        rebuild.add(game.name)
+
+def check_luabackend(luabackend: Luabackend, symlinks: Symlinks, environment: Environment, settings: Settings, settings_path: pathlib.Path):
+   print('Checking luabackend')
+   if (luabackend.update != False) or not luabackend.folder.exists():
+      print('Checking for luabackend updates...')
+      # exclude luabackend.toml
+      # symlink the dll correctly
+      downloaded = download_latest(
+         last_date = luabackend.update if isinstance(luabackend.update, datetime.datetime) else None,
+         name = 'luabackend',
+         url = 'https://api.github.com/repos/Sirius902/LuaBackend/releases/latest',
+         predicate = lambda x: x['name'] == 'DBGHELP.zip',
+         has_extra_folder = False,
+         destination_folder = luabackend.folder
+      )
+      if downloaded is not None:
+         if luabackend.update != False:
+            luabackend.update = downloaded
+            save_settings(settings, settings_path)
+   if not luabackend.settings.exists():
+      print('Creating default luabackend settings')
+      with open(luabackend.settings, 'w', encoding='utf-8') as mods_file:
+         mgr_data = {}
+         tomlkit.dump(mgr_data, mods_file)
 
 def download_latest(
    last_date: datetime.datetime | None,

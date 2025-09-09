@@ -60,12 +60,12 @@ class OpenKh:
 @dataclasses.dataclass
 class Luabackend:
    folder: pathlib.Path
-   settings: typing.Optional[pathlib.Path]
+   settings: pathlib.Path
    update: bool | datetime.datetime
 
 @dataclasses.dataclass
 class Refined:
-   settings: typing.Optional[pathlib.Path]
+   settings: pathlib.Path
 
 @dataclasses.dataclass
 class Randomizer:
