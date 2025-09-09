@@ -14,7 +14,6 @@ class LaunchExe:
 @dataclasses.dataclass
 class KhGame:
    saves: typing.Optional[pathlib.Path]
-   store: StoreKind
    folder: pathlib.Path
 
 @dataclasses.dataclass
@@ -46,7 +45,7 @@ class Games:
 
 @dataclasses.dataclass
 class Panacea:
-   settings: typing.Optional[pathlib.Path]
+   settings: pathlib.Path
 
 @dataclasses.dataclass
 class OpenKh:
@@ -85,6 +84,7 @@ class Settings:
    wineprefix: typing.Optional[pathlib.Path]
    epic_id: typing.Optional[int]
    steam_id: typing.Optional[int]
+   store: StoreKind
    games: Games
    mods: Mods
    

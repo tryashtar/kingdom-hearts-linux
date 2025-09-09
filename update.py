@@ -90,183 +90,147 @@ def main():
    else:
       print('Windows detected')
       environment = WindowsEnvironment()
-
+   
+   def handle_saves(game: KhGame | None, path_part: str):
+      if game is not None:
+         if game.saves is not None:
+            game.saves.mkdir(parents=True, exist_ok=True)
+            if settings.epic_id is not None and settings.store == 'epic':
+               make_symlink(environment.user_folder / 'Documents' / path_part / 'Epic Games Store' / str(settings.epic_id), game.saves, True)
+            if settings.steam_id is not None and settings.store == 'steam':
+               make_symlink(environment.user_folder / 'Documents/My Games' / path_part / 'Steam' / str(settings.steam_id), game.saves, True)
+         else:
+            if settings.epic_id is not None:
+               remove_symlinks.add(environment.user_folder / 'Documents' / path_part / 'Epic Games Store' / str(settings.epic_id))
+            if settings.steam_id is not None:
+               remove_symlinks.add(environment.user_folder / 'Documents/My Games' / path_part / 'Steam' / str(settings.epic_id))
+   
    print('Checking save folders')
-   if settings.games.kh15_25 is not None and settings.games.kh15_25.saves is not None:
-      save = settings.games.kh15_25.saves
-      save.mkdir(parents=True, exist_ok=True)
-      if settings.epic_id is not None and settings.games.kh15_25.store == 'epic':
-         make_symlink(environment.user_folder / 'Documents/KINGDOM HEARTS HD 1.5+2.5 ReMIX/Epic Games Store' / str(settings.epic_id), save, True)
-      if settings.steam_id is not None and settings.games.kh15_25.store == 'steam':
-         make_symlink(environment.user_folder / 'Documents/My Games/KINGDOM HEARTS HD 1.5+2.5 ReMIX/Steam' / str(settings.steam_id), save, True)
-      if settings.mods.refined is not None:
+   handle_saves(settings.games.kh15_25, 'KINGDOM HEARTS HD 1.5+2.5 ReMIX')
+   handle_saves(settings.games.kh28, 'KINGDOM HEARTS HD 2.8 Final Chapter Prologue')
+   handle_saves(settings.games.kh3, 'KINGDOM HEARTS III')
+   handle_saves(settings.games.khmom, 'KINGDOM HEARTS Melody of Memory')
+   if settings.games.kh15_25 is not None:
+      if (save := settings.games.kh15_25.saves) and settings.mods.refined is not None:
          make_symlink(environment.user_folder / 'Documents/Kingdom Hearts/Configuration', save, True)
          make_symlink(environment.user_folder / 'Documents/Kingdom Hearts/Save Data', save, True)
-   if settings.games.kh28 is not None and settings.games.kh28.saves is not None:
-      save = settings.games.kh28.saves
-      save.mkdir(parents=True, exist_ok=True)
-      if settings.epic_id is not None and settings.games.kh28.store == 'epic':
-         make_symlink(environment.user_folder / 'Documents/KINGDOM HEARTS HD 2.8 Final Chapter Prologue/Epic Games Store' / str(settings.epic_id), save, True)
-      if settings.steam_id is not None and settings.games.kh28.store == 'steam':
-         make_symlink(environment.user_folder / 'Documents/My Games/KINGDOM HEARTS HD 2.8 Final Chapter Prologue/Steam' / str(settings.steam_id), save, True)
-   if settings.games.kh3 is not None and settings.games.kh3.saves is not None:
-      save = settings.games.kh3.saves
-      save.mkdir(parents=True, exist_ok=True)
-      if settings.epic_id is not None and settings.games.kh3.store == 'epic':
-         make_symlink(environment.user_folder / 'Documents/KINGDOM HEARTS III/Epic Games Store' / str(settings.epic_id), save, True)
-      if settings.steam_id is not None and settings.games.kh3.store == 'steam':
-         make_symlink(environment.user_folder / 'Documents/My Games/KINGDOM HEARTS III/Steam' / str(settings.steam_id), save, True)
-   if settings.games.khmom is not None and settings.games.khmom.saves is not None:
-      save = settings.games.khmom.saves
-      save.mkdir(parents=True, exist_ok=True)
-      if settings.epic_id is not None and settings.games.khmom.store == 'epic':
-         make_symlink(environment.user_folder / 'Documents/KINGDOM HEARTS Melody of Memory/Epic Games Store' / str(settings.epic_id), save, True)
-      if settings.steam_id is not None and settings.games.khmom.store == 'steam':
-         make_symlink(environment.user_folder / 'Documents/My Games/KINGDOM HEARTS Melody of Memory/Steam' / str(settings.steam_id), save, True)
-   
-      remove_symlinks.add(os.path.join(kh15_folder, 'reFined.ini'))
-      remove_symlinks.add(os.path.join(kh15_folder, 'reFined.cfg'))
-      remove_symlinks.add(os.path.join(kh15_folder, 'version.dll'))
-      remove_symlinks.add(os.path.join(kh15_folder, 'DINPUT8.dll'))
-      remove_symlinks.add(os.path.join(kh15_folder, 'DBGHELP.dll'))
-      remove_symlinks.add(os.path.join(kh15_folder, 'LuaBackend.dll'))
-      remove_symlinks.add(os.path.join(kh15_folder, 'panacea_settings.txt'))
-      remove_symlinks.add(os.path.join(kh15_folder, 'lua54.dll'))
-      remove_symlinks.add(os.path.join(kh15_folder, 'LuaBackend.toml'))
-
-   
-   if kh28_folder is not None:
-      epic_folder = os.path.join(kh28_folder, 'EPIC')
-      remove_symlinks.add(os.path.join(kh28_folder, 'DINPUT8.dll'))
-      remove_symlinks.add(os.path.join(kh28_folder, 'DBGHELP.dll'))
-      remove_symlinks.add(os.path.join(kh28_folder, 'lua54.dll'))
-      remove_symlinks.add(os.path.join(kh28_folder, 'LuaBackend.toml'))
-      remove_symlinks.add(os.path.join(kh28_folder, 'panacea_settings.txt'))
-
-   def restore_folder(kh_folder):
-      backup_folder = os.path.join(kh_folder, 'BackupImage')
-      source_folder = os.path.join(kh_folder, 'Image/en')
-      if os.path.exists(backup_folder):
-         for file in os.listdir(backup_folder):
-            shutil.copyfile(os.path.join(backup_folder, file), os.path.join(source_folder, file))
-         shutil.rmtree(backup_folder)
-
-   if openkh_folder is not None:
-      default_mods_folder = os.path.join(openkh_folder, 'mods')
-      custom_mods_folder = settings['mods'].get('folder')
-      write_mods_folder = custom_mods_folder if custom_mods_folder is not None else default_mods_folder
-      mods_manager = os.path.join(openkh_folder, 'mods-manager.yml')
-      pana_settings = settings['mods'].get('panacea_settings')
-      if settings['mods']['update_openkh'] == True or not os.path.exists(openkh_folder):
-         print('Checking for OpenKH updates...')
-         downloaded = download_latest(settings, settings_path, 'openkh', 'https://api.github.com/repos/OpenKH/OpenKh/releases/tags/latest', lambda x: x['name'] == 'openkh.zip', True, openkh_folder)
       else:
-         downloaded = False
-      if downloaded and not os.path.exists(mods_manager):
-         print('Creating default OpenKH mod manager configuration')
-         with open(mods_manager, 'w', encoding='utf-8') as mods_file:
-            yaml.dump({"gameEdition":2}, mods_file)
-         if pana_settings is not None and not os.path.exists(pana_settings):
-            print('Creating default panacea configuration')
-            with open(pana_settings, 'w', encoding='utf-8') as pana_file:
-               pana_file.write('show_console=False')
-      if kh15_folder is not None:
-         if settings['mods'].get('panacea') == True:
-            if is_linux:
-               make_symlink(os.path.join(kh15_folder, 'version.dll'), os.path.join(openkh_folder, 'OpenKH.Panacea.dll'), False)
-            else:
-               make_symlink(os.path.join(kh15_folder, 'DBGHELP.dll'), os.path.join(openkh_folder, 'OpenKH.Panacea.dll'), False)
-         make_symlink(os.path.join(kh15_folder, 'dependencies/avcodec-vgmstream-59.dll'), os.path.join(openkh_folder, 'avcodec-vgmstream-59.dll'), False)
-         make_symlink(os.path.join(kh15_folder, 'dependencies/avformat-vgmstream-59.dll'), os.path.join(openkh_folder, 'avformat-vgmstream-59.dll'), False)
-         make_symlink(os.path.join(kh15_folder, 'dependencies/avutil-vgmstream-57.dll'), os.path.join(openkh_folder, 'avutil-vgmstream-57.dll'), False)
-         make_symlink(os.path.join(kh15_folder, 'dependencies/bass.dll'), os.path.join(openkh_folder, 'bass.dll'), False)
-         make_symlink(os.path.join(kh15_folder, 'dependencies/bass_vgmstream.dll'), os.path.join(openkh_folder, 'bass_vgmstream.dll'), False)
-         make_symlink(os.path.join(kh15_folder, 'dependencies/libatrac9.dll'), os.path.join(openkh_folder, 'libatrac9.dll'), False)
-         make_symlink(os.path.join(kh15_folder, 'dependencies/libcelt-0061.dll'), os.path.join(openkh_folder, 'libcelt-0061.dll'), False)
-         make_symlink(os.path.join(kh15_folder, 'dependencies/libcelt-0110.dll'), os.path.join(openkh_folder, 'libcelt-0110.dll'), False)
-         make_symlink(os.path.join(kh15_folder, 'dependencies/libg719_decode.dll'), os.path.join(openkh_folder, 'libg719_decode.dll'), False)
-         make_symlink(os.path.join(kh15_folder, 'dependencies/libmpg123-0.dll'), os.path.join(openkh_folder, 'libmpg123-0.dll'), False)
-         make_symlink(os.path.join(kh15_folder, 'dependencies/libspeex-1.dll'), os.path.join(openkh_folder, 'libspeex-1.dll'), False)
-         make_symlink(os.path.join(kh15_folder, 'dependencies/libvorbis.dll'), os.path.join(openkh_folder, 'libvorbis.dll'), False)
-         make_symlink(os.path.join(kh15_folder, 'dependencies/swresample-vgmstream-4.dll'), os.path.join(openkh_folder, 'swresample-vgmstream-4.dll'), False)
-         if pana_settings is not None:
-            make_symlink(os.path.join(kh15_folder, 'panacea_settings.txt'), pana_settings, False)
-      if kh28_folder is not None:
-         if settings['mods'].get('panacea') == True:
-            if is_linux:
-               make_symlink(os.path.join(kh28_folder, 'version.dll'), os.path.join(openkh_folder, 'OpenKH.Panacea.dll'), False)
-            else:
-               make_symlink(os.path.join(kh28_folder, 'DBGHELP.dll'), os.path.join(openkh_folder, 'OpenKH.Panacea.dll'), False)
-         if pana_settings is not None:
-            make_symlink(os.path.join(kh28_folder, 'panacea_settings.txt'), pana_settings, False)
-      built_mods_folder = os.path.join(openkh_folder, 'mod')
-      if os.path.exists(pana_settings):
-         windows_folder = convert_path(built_mods_folder)
-         changes = False
-         found = False
-         with open(pana_settings, 'r', encoding='utf-8') as pana_file:
-            lines = [line.rstrip('\n') for line in pana_file]
-         for i in range(len(lines)):
-            line = lines[i]
-            key,value = line.split('=', 1)
-            if key == 'mod_path':
-               found = True
-               if value != windows_folder:
-                  value = windows_folder
-                  changes = True
-                  lines[i] = f'{key}={value}'
-         if not found:
-            lines.append(f'mod_path={windows_folder}')
-            changes = True
-         if changes:
-            print('Updating Panacea mods location')
-            with open(pana_settings, 'w', encoding='utf-8') as pana_file:
-               for line in lines:
-                  pana_file.write(line + '\n')
+         remove_symlinks.add(environment.user_folder / 'Documents/Kingdom Hearts/Configuration')
+         remove_symlinks.add(environment.user_folder / 'Documents/Kingdom Hearts/Save Data')
+   
+   if settings.games.kh15_25 is not None:
+      remove_symlinks.add(settings.games.kh15_25.folder / 'reFined.cfg')
+   
+   for game in [settings.games.kh15_25, settings.games.kh28]:
+      if game is not None:
+         game: KhGame
+         remove_symlinks.add(game.folder / 'version.dll')
+         remove_symlinks.add(game.folder / 'DINPUT8.dll')
+         remove_symlinks.add(game.folder / 'DBGHELP.dll')
+         remove_symlinks.add(game.folder / 'LuaBackend.dll')
+         remove_symlinks.add(game.folder / 'lua54.dll')
+         remove_symlinks.add(game.folder / 'LuaBackend.toml')
+         remove_symlinks.add(game.folder / 'panacea_settings.txt')
 
-      remove_symlinks.add(default_mods_folder)
-      remove_symlinks.add(os.path.join(openkh_folder, 'mods-KH1.txt'))
-      remove_symlinks.add(os.path.join(openkh_folder, 'mods-KH2.txt'))
-      remove_symlinks.add(os.path.join(openkh_folder, 'mods-BBS.txt'))
-      remove_symlinks.add(os.path.join(openkh_folder, 'mods-ReCoM.txt'))
-      remove_symlinks.add(os.path.join(openkh_folder, 'mods-KH3D.txt'))
-      if custom_mods_folder is not None:
-         os.makedirs(custom_mods_folder, exist_ok=True)
-         make_symlink(default_mods_folder, custom_mods_folder, True)
-         make_symlink(os.path.join(openkh_folder, 'mods-KH1.txt'), os.path.join(custom_mods_folder, 'kh1.txt'), False)
-         make_symlink(os.path.join(openkh_folder, 'mods-KH2.txt'), os.path.join(custom_mods_folder, 'kh2.txt'), False)
-         make_symlink(os.path.join(openkh_folder, 'mods-BBS.txt'), os.path.join(custom_mods_folder, 'bbs.txt'), False)
-         make_symlink(os.path.join(openkh_folder, 'mods-ReCoM.txt'), os.path.join(custom_mods_folder, 'Recom.txt'), False)
-         make_symlink(os.path.join(openkh_folder, 'mods-KH3D.txt'), os.path.join(custom_mods_folder, 'kh3d.txt'), False)
-      if os.path.exists(mods_manager):
-         changes = False
-         with open(mods_manager, 'r', encoding='utf-8') as mods_file:
-            mods_data = yaml.safe_load(mods_file)
-         if kh15_folder is not None:
-            pc_release = convert_path(kh15_folder)
-            if mods_data.get('pcReleaseLocation') != pc_release:
-               print('Updating KH 1.5 install location in OpenKH mod manager')
-               mods_data['pcReleaseLocation'] = pc_release
-               changes = True
-         if kh28_folder is not None:
-            pc_release = convert_path(kh28_folder)
-            if mods_data.get('pcReleaseLocationKH3D') != pc_release:
-               print('Updating KH 2.8 install location in OpenKH mod manager')
-               mods_data['pcReleaseLocationKH3D'] = pc_release
-               changes = True
-         panacea = settings['mods'].get('panacea') == True
-         if mods_data.get('panaceaInstalled') != panacea:
-            print('Updating panacea install status in OpenKH mod manager')
-            mods_data['panaceaInstalled'] = panacea
-            changes = True
-         if changes:
-            with open(mods_manager, 'w', encoding='utf-8') as mods_file:
-               yaml.dump(mods_data, mods_file, sort_keys=False)
+   if settings.mods.openkh is not None:
+      print('Checking OpenKh')
+      default_manager_settings = settings.mods.openkh.folder / 'mods-manager.yml'
+      manager_settings = settings.mods.openkh.settings if settings.mods.openkh.settings is not None else default_manager_settings
+      if (settings.mods.openkh.update != False) or not settings.mods.openkh.folder.exists():
+         print('Checking for OpenKh updates...')
+         downloaded = download_latest(
+            last_date = settings.mods.openkh.update if isinstance(settings.mods.openkh.update, datetime.datetime) else None,
+            name = 'openkh',
+            url = 'https://api.github.com/repos/OpenKH/OpenKh/releases/tags/latest',
+            predicate = lambda x: x['name'] == 'openkh.zip',
+            has_extra_folder = True,
+            destination_folder = settings.mods.openkh.folder
+         )
+         if downloaded is not None:
+            if settings.mods.openkh.update != False:
+               settings.mods.openkh.update = downloaded
+               save_settings(settings, settings_path)
+            if not manager_settings.exists():
+               print('Creating default mod manager configuration')
+               with open(manager_settings, 'w', encoding='utf-8') as mods_file:
+                  data = {
+                     'wizardVersionNumber': 1,
+                     'gameEdition': 2,
+                  }
+                  yaml.dump(data, mods_file)
+      print('Checking mod manager configuration')
+      remove_symlinks.add(default_manager_settings)
+      if settings.mods.openkh.settings is not None:
+         make_symlink(default_manager_settings, settings.mods.openkh.settings, is_dir=True)
+      remove_symlinks.add(settings.mods.openkh.folder / 'mods-KH1.txt')
+      remove_symlinks.add(settings.mods.openkh.folder / 'mods-KH2.txt')
+      remove_symlinks.add(settings.mods.openkh.folder / 'mods-BBS.txt')
+      remove_symlinks.add(settings.mods.openkh.folder / 'mods-ReCoM.txt')
+      remove_symlinks.add(settings.mods.openkh.folder / 'mods-KH3D.txt')
+      remove_symlinks.add(settings.mods.openkh.folder / 'collection-mods-KH1.json')
+      remove_symlinks.add(settings.mods.openkh.folder / 'collection-mods-KH2.json')
+      remove_symlinks.add(settings.mods.openkh.folder / 'collection-mods-BBS.json')
+      remove_symlinks.add(settings.mods.openkh.folder / 'collection-mods-ReCoM.json')
+      remove_symlinks.add(settings.mods.openkh.folder / 'collection-mods-KH3D.json')
+      if settings.mods.openkh.mods is not None:
+         if settings.games.kh15_25 is not None:
+            make_symlink(settings.mods.openkh.folder / 'mods-KH1.txt', settings.mods.openkh.mods / 'kh1.txt', is_dir=False)
+            make_symlink(settings.mods.openkh.folder / 'mods-KH2.txt', settings.mods.openkh.mods / 'kh2.txt', is_dir=False)
+            make_symlink(settings.mods.openkh.folder / 'mods-BBS.txt', settings.mods.openkh.mods / 'bbs.txt', is_dir=False)
+            make_symlink(settings.mods.openkh.folder / 'mods-ReCoM.txt', settings.mods.openkh.mods / 'Recom.txt', is_dir=False)
+            make_symlink(settings.mods.openkh.folder / 'collection-mods-KH1.json', settings.mods.openkh.mods / 'kh1-collection.json', is_dir=False)
+            make_symlink(settings.mods.openkh.folder / 'collection-mods-KH2.json', settings.mods.openkh.mods / 'kh2-collection.json', is_dir=False)
+            make_symlink(settings.mods.openkh.folder / 'collection-mods-BBS.json', settings.mods.openkh.mods / 'bbs-collection.json', is_dir=False)
+            make_symlink(settings.mods.openkh.folder / 'collection-mods-ReCoM.json', settings.mods.openkh.mods / 'Recom-collection.json', is_dir=False)
+         if settings.games.kh28 is not None:
+            make_symlink(settings.mods.openkh.folder / 'mods-KH3D.txt', settings.mods.openkh.mods / 'kh3d.txt', is_dir=False)
+            make_symlink(settings.mods.openkh.folder / 'collection-mods-KH3D.json', settings.mods.openkh.mods / 'kh3d-collection.json', is_dir=False)
+
+      with open(manager_settings, 'r', encoding='utf-8') as mods_file:
+         data = yaml.load(mods_file, yaml.CLoader)
+      changed = False
+      if settings.mods.openkh.mods is not None:
+         changed |= set_data(data, 'modCollectionPath', environment.convert_path(settings.mods.openkh.mods))
+         changed |= set_data(data, 'modCollectionsPath', environment.convert_path(settings.mods.openkh.mods / 'collections'))
+         changed |= set_data(data, 'gameModPath', environment.convert_path(settings.mods.openkh.mods / 'output'))
+      changed |= set_data(data, 'panaceaInstalled', settings.mods.openkh.panacea is not None)
+      changed |= set_data(data, 'pcVersion', {'steam': 'Steam', 'epic': 'EGS'}[settings.store])
+      if settings.games.kh15_25 is not None:
+         changed |= set_data(data, 'pcReleaseLocation', environment.convert_path(settings.games.kh15_25.folder))
+      if settings.games.kh28 is not None:
+         changed |= set_data(data, 'pcReleaseLocationKH3D', environment.convert_path(settings.games.kh28.folder))
+      if changed:
+         with open(manager_settings, 'w', encoding='utf-8') as mods_file:
+            yaml.dump(data, mods_file)
+      
+      if settings.mods.openkh.panacea is not None:
+         print('Checking panacea')
+         for game in [settings.games.kh15_25, settings.games.kh28]:
+            if game is not None:
+               game: KhGame
+               dll = 'version.dll' if is_linux else 'DBGHELP.dll'
+               make_symlink(game.folder / dll, settings.mods.openkh.folder / 'OpenKH.Panacea.dll', is_dir=False)
+               make_symlink(game.folder / dll, settings.mods.openkh.folder / 'OpenKH.Panacea.dll', is_dir=False)
+               make_symlink(game.folder / 'panacea_settings.txt', settings.mods.openkh.panacea.settings, is_dir=False)
+         if not settings.mods.openkh.panacea.settings.exists():
+            print('Creating default panacea settings')
+            with open(settings.mods.openkh.panacea.settings, 'w', encoding='utf-8') as mods_file:
+               mods_file.writelines([
+                  'show_console=False\n'
+               ])
+         with open(settings.mods.openkh.panacea.settings, 'r', encoding='utf-8') as mods_file:
+            data = {key: value for key, value in [line.rstrip('\n').split('=', 1) for line in mods_file.readlines()]}
+         changed = False
+         path = settings.mods.openkh.mods / 'output' if settings.mods.openkh.mods is not None else settings.mods.openkh.folder / 'mod'
+         changed |= set_data(data, 'mod_path', environment.convert_path(path))
+         if changed:
+            with open(settings.mods.openkh.panacea.settings, 'r', encoding='utf-8') as mods_file:
+               mods_file.writelines([f'{key}={value}\n' for key, value in data.items()])
 
       def download_mod(game, repo):
          if openkh_folder is None:
             return
-         patch_folder = os.path.join(write_mods_folder, game, repo)
+         patch_folder = os.path.join(mods_folder, game, repo)
          if game not in mod_changes:
             mod_changes[game] = {}
          if not os.path.exists(patch_folder):
@@ -323,9 +287,9 @@ def main():
 
       rebuild = set()
       if settings['mods']['update_openkh_mods'] == True:
-         if os.path.exists(write_mods_folder):
-            for game in next(os.walk(write_mods_folder))[1]:
-               for mod_dir in [os.path.join(dp, f) for dp, dn, _ in os.walk(os.path.join(write_mods_folder, game)) for f in dn]:
+         if os.path.exists(mods_folder):
+            for game in next(os.walk(mods_folder))[1]:
+               for mod_dir in [os.path.join(dp, f) for dp, dn, _ in os.walk(os.path.join(mods_folder, game)) for f in dn]:
                   if os.path.exists(os.path.join(mod_dir, '.git')):
                      print(f'Checking for updates for mod {os.path.basename(mod_dir)}')
                      old_hash = subprocess.run(['git', 'rev-parse', 'HEAD'], cwd=mod_dir, check=True, stdout=subprocess.PIPE).stdout
@@ -371,7 +335,7 @@ def main():
                for file in os.listdir(os.path.join(data_folder, 'original')):
                   shutil.move(os.path.join(data_folder, 'original', file), data_folder)
             print(f'Building {gameid} mods')
-            run_program([os.path.join(openkh_folder, 'OpenKh.Command.IdxImg.exe'), 'hed', 'build', '-g', gameid, '-o', convert_path(os.path.join(built_mods_folder, gameid)), '-e', convert_path(enabled_mods[gameid][0]), '-f', convert_path(os.path.join(write_mods_folder, gameid)), '-d', convert_path(data_folder)])
+            run_program([os.path.join(openkh_folder, 'OpenKh.Command.IdxImg.exe'), 'hed', 'build', '-g', gameid, '-o', convert_path(os.path.join(built_mods_folder, gameid)), '-e', convert_path(enabled_mods[gameid][0]), '-f', convert_path(os.path.join(mods_folder, gameid)), '-d', convert_path(data_folder)])
             patch_folder = os.path.join(openkh_folder, 'patched')
             if settings['mods'].get('panacea') != True:
                backup_folder = os.path.join(kh_folder, 'BackupImage')
@@ -487,6 +451,27 @@ def main():
    make_launch('kh0.2', kh28_folder, False, False, False)
    make_launch('kh3', kh3_folder, False, False, False)
    make_launch('khmom', khmom_folder, False, False, False)
+
+def set_data(data: dict[str, typing.Any], key: str, value: typing.Any) -> bool:
+   current = data.get(key)
+   data[key] = value
+   if value != current:
+      print(f'Changing {key} from {value} to {current}')
+   return value != current
+
+def backup_folder(source: pathlib.Path, backup: pathlib.Path):
+   if source.exists():
+      backup.mkdir(parents=True, exist_ok=True)
+      for file in source.iterdir():
+         relative_name = file.relative_to(source)
+         shutil.copyfile(file, backup / relative_name)
+
+def restore_folder(source: pathlib.Path, backup: pathlib.Path):
+   if backup.exists():
+      for file in backup.iterdir():
+         relative_name = file.relative_to(backup)
+         shutil.copyfile(file, source / relative_name)
+      shutil.rmtree(backup)
 
 class Environment(abc.ABC):
    @abc.abstractmethod
