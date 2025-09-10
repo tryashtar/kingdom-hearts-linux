@@ -13,7 +13,7 @@ import stat
 import platform
 import pyunpack
 import pathlib
-from settings import KhGame, LaunchExe, Luabackend, OpenKh, Randomizer, Settings, StoreKind, get_settings, save_settings
+from settings import KhGame, LaunchExe, Luabackend, OpenKh, Randomizer, Settings, get_settings, save_settings
 
 def main():
    settings_path = pathlib.Path(__file__).parent / 'settings.yaml'
@@ -86,8 +86,8 @@ class Environment:
    def run_program(self, args: list[str]) -> subprocess.CompletedProcess: pass
    @abc.abstractmethod
    def make_launch(self, game: KhGame, exe: LaunchExe, settings: Settings): pass
-   @abc.abstractmethod
    @classmethod
+   @abc.abstractmethod
    def is_linux(cls) -> bool: pass
 
 class WindowsEnvironment(Environment):
@@ -161,12 +161,12 @@ class LinuxEnvironment(Environment):
       env_vars['GAMEID'] = game.umu_id()
       env_vars['STORE'] = {'steam': 'steam', 'epic': 'egs'}[settings.store]
       with open(exe.launch, 'w', encoding='utf-8') as sh_file:
-         vars = ' '.join(f'{key}="{value}"' for key, value in env_vars.items())
+         env = ' '.join(f'{key}="{value}"' for key, value in env_vars.items())
          exe_path = exe.exe.relative_to(game.folder)
          sh_file.writelines([
             '#!/bin/sh\n',
             f'cd "{game.folder}" || exit 1\n',
-            f'{vars} exec umu-run {exe_path}\n'
+            f'{env} exec umu-run "{exe_path}"\n'
          ])
       filestat = exe.launch.stat()
       exe.launch.chmod(filestat.st_mode | stat.S_IEXEC)
@@ -198,32 +198,17 @@ def get_environment(settings: Settings) -> Environment:
       if winetricks_log.exists():
          with open(winetricks_log, 'r', encoding='utf-8') as winetricks_file:
             winetricks = [line.rstrip('\n') for line in winetricks_file]
-      if settings.mods.openkh is not None and 'dotnet6' not in winetricks:
-         # is this needed?
-         print('Installing dotnet6 to wineprefix')
+      if len(settings.games.get_classic()) > 0 and 'dotnet48' not in winetricks:
+         print('Installing dotnet48 to wineprefix')
          subprocess.run(
-            ['winetricks', '-q', 'dotnet6'],
+            ['winetricks', '-q', 'dotnet48'],
             check=True,
             env=environment.wine_env
          )
+      if settings.games.kh3 is not None and 'wmp11' not in winetricks:
+         print('Installing wmp11 to wineprefix')
          subprocess.run(
-            ['wine', 'reg', 'add', 'HKEY_CURRENT_USER\\Environment', '/f', '/v', 'DOTNET_ROOT', '/t', 'REG_SZ', '/d', 'C:\\Program Files\\dotnet'],
-            check=True,
-            env=environment.wine_env
-         )
-      if settings.mods.openkh is not None and 'dotnetdesktop6' not in winetricks:
-         # is this needed?
-         print('Installing dotnetdesktop6 to wineprefix')
-         subprocess.run(
-            ['winetricks', '-q', 'dotnetdesktop6'],
-            check=True,
-            env=environment.wine_env
-         )
-      if (len(settings.games.get_classic()) > 0) and 'vkd3d' not in winetricks:
-         # is this needed?
-         print('Installing VKD3D to wineprefix')
-         subprocess.run(
-            ['winetricks', '-q', 'dxvk', 'vkd3d'],
+            ['winetricks', '-q', 'wmp11'],
             check=True,
             env=environment.wine_env
          )
@@ -347,15 +332,15 @@ def check_openkh(openkh: OpenKh, symlinks: Symlinks, environment: Environment, s
       mgr_data = yaml.load(mods_file, yaml.CLoader)
    changed = False
    if openkh.mods is not None:
-      changed |= set_data(mgr_data, 'modCollectionPath', environment.convert_path(openkh.mods))
-      changed |= set_data(mgr_data, 'modCollectionsPath', environment.convert_path(openkh.mods / 'collections'))
-      changed |= set_data(mgr_data, 'gameModPath', environment.convert_path(openkh.mods / 'output'))
+      changed |= set_data(mgr_data, 'modCollectionPath', str(environment.convert_path(openkh.mods)))
+      changed |= set_data(mgr_data, 'modCollectionsPath', str(environment.convert_path(openkh.mods / 'collections')))
+      changed |= set_data(mgr_data, 'gameModPath', str(environment.convert_path(openkh.mods / 'output')))
    changed |= set_data(mgr_data, 'panaceaInstalled', openkh.panacea is not None)
    changed |= set_data(mgr_data, 'pcVersion', {'steam': 'Steam', 'epic': 'EGS'}[settings.store])
    if settings.games.kh15_25 is not None:
-      changed |= set_data(mgr_data, 'pcReleaseLocation', environment.convert_path(settings.games.kh15_25.folder))
+      changed |= set_data(mgr_data, 'pcReleaseLocation', str(environment.convert_path(settings.games.kh15_25.folder)))
    if settings.games.kh28 is not None:
-      changed |= set_data(mgr_data, 'pcReleaseLocationKH3D', environment.convert_path(settings.games.kh28.folder))
+      changed |= set_data(mgr_data, 'pcReleaseLocationKH3D', str(environment.convert_path(settings.games.kh28.folder)))
    if changed:
       with open(manager_settings, 'w', encoding='utf-8') as mods_file:
          yaml.dump(mgr_data, mods_file)
@@ -377,9 +362,9 @@ def check_openkh(openkh: OpenKh, symlinks: Symlinks, environment: Environment, s
          pana_data = dict(line.rstrip('\n').split('=', 1) for line in mods_file.readlines())
       changed = False
       path = pathlib.Path(mgr_data['gameModPath'])
-      changed |= set_data(pana_data, 'mod_path', environment.convert_path(path))
+      changed |= set_data(pana_data, 'mod_path', str(environment.convert_path(path)))
       if changed:
-         with open(openkh.panacea.settings, 'r', encoding='utf-8') as mods_file:
+         with open(openkh.panacea.settings, 'w', encoding='utf-8') as mods_file:
             mods_file.writelines([f'{key}={value}\n' for key, value in pana_data.items()])
    
    rebuild: set[str] = set()            
@@ -473,27 +458,27 @@ def check_luabackend(luabackend: Luabackend, openkh_settings: dict[str, typing.A
       script_path = environment.convert_path(game_folder / version / 'scripts')
       for entry in data[version]['scripts']:
          if entry.get('openkh') == True:
-            return set_data(entry, 'path', script_path)
+            return set_data(entry, 'path', str(script_path))
       data[version]['scripts'].append({'path': script_path, 'relative': False, 'openkh': True})
       print(f'Added openkh script entry {script_path}')
       return True
    if settings.games.kh15_25 is not None:
-      changed |= set_data(data['kh1'], 'exe', environment.convert_path(settings.games.kh15_25.kh1.exe))
-      changed |= set_data(data['kh2'], 'exe', environment.convert_path(settings.games.kh15_25.kh2.exe))
-      changed |= set_data(data['bbs'], 'exe', environment.convert_path(settings.games.kh15_25.khbbs.exe))
-      changed |= set_data(data['recom'], 'exe', environment.convert_path(settings.games.kh15_25.khrecom.exe))
+      changed |= set_data(data['kh1'], 'exe', str(environment.convert_path(settings.games.kh15_25.kh1.exe)))
+      changed |= set_data(data['kh2'], 'exe', str(environment.convert_path(settings.games.kh15_25.kh2.exe)))
+      changed |= set_data(data['bbs'], 'exe', str(environment.convert_path(settings.games.kh15_25.khbbs.exe)))
+      changed |= set_data(data['recom'], 'exe', str(environment.convert_path(settings.games.kh15_25.khrecom.exe)))
       path = pathlib.Path(settings.games.kh15_25.saves_folder())
       if settings.store == 'steam':
          path = 'My Games' / path
       for version in ['kh1', 'kh2', 'bbs', 'recom']:
-         changed |= set_data(data[version], 'game_docs', environment.convert_path(path))
+         changed |= set_data(data[version], 'game_docs', str(environment.convert_path(path)))
          changed |= add_openkh(version)
    if settings.games.kh28 is not None:
-      changed |= set_data(data['kh3d'], 'exe', environment.convert_path(settings.games.kh28.khddd.exe))
+      changed |= set_data(data['kh3d'], 'exe', str(environment.convert_path(settings.games.kh28.khddd.exe)))
       path = pathlib.Path(settings.games.kh28.saves_folder())
       if settings.store == 'steam':
          path = 'My Games' / path
-      changed |= set_data(data['kh3d'], 'game_docs', environment.convert_path(path))
+      changed |= set_data(data['kh3d'], 'game_docs', str(environment.convert_path(path)))
       changed |= add_openkh('kh3d')
    if changed:
       with open(luabackend.settings, 'w', encoding='utf-8') as mods_file:

@@ -16,11 +16,11 @@ class LaunchExe:
 class KhGame:
    saves: typing.Optional[pathlib.Path]
    folder: pathlib.Path
-   @abc.abstractmethod
    @classmethod
+   @abc.abstractmethod
    def saves_folder(cls) -> str: pass
-   @abc.abstractmethod
    @classmethod
+   @abc.abstractmethod
    def umu_id(cls) -> str: pass
    @abc.abstractmethod
    def get_exes(self) -> list[LaunchExe]: pass
