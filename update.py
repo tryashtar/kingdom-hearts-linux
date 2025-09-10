@@ -13,7 +13,7 @@ import stat
 import platform
 import pyunpack
 import pathlib
-from settings import KhGame, Luabackend, OpenKh, Randomizer, Settings, get_settings, save_settings
+from settings import KhGame, LaunchExe, Luabackend, OpenKh, Randomizer, Settings, StoreKind, get_settings, save_settings
 
 def main():
    settings_path = pathlib.Path(__file__).parent / 'settings.yaml'
@@ -37,147 +37,27 @@ def main():
       symlinks.remove(game.folder / 'LuaBackend.dll')
       symlinks.remove(game.folder / 'LuaBackend.toml')
       symlinks.remove(game.folder / 'panacea_settings.txt')
-      if settings.mods.openkh is not None and settings.mods.openkh.panacea is not None:
+      if settings.mods.openkh is None or settings.mods.openkh.panacea is not None:
          restore_folder(game.folder / 'Image', game.folder / 'Image-BACKUP')
 
    if settings.mods.openkh is not None:
-      check_openkh(settings.mods.openkh, symlinks, environment, settings, settings_path)
+      openkh_settings = check_openkh(settings.mods.openkh, symlinks, environment, settings, settings_path)
+   else:
+      openkh_settings = None
 
    if settings.mods.luabackend is not None:
-      check_luabackend(settings.mods.luabackend, symlinks, environment, settings, settings_path)
+      check_luabackend(settings.mods.luabackend, openkh_settings, symlinks, environment, settings, settings_path)
    
    if settings.mods.randomizer is not None:
       check_randomizer(settings.mods.randomizer, settings, settings_path)
    
-      def handle_games(kh_folder, ids):
-         for gameid, txtid in ids:
-            enabled_mods_path = os.path.join(openkh_folder, f'mods-{txtid}.txt')
-            if os.path.exists(enabled_mods_path):
-               with open(enabled_mods_path, 'r', encoding='utf-8') as enabled_file:
-                  enabled_mods[gameid] = (enabled_mods_path, [line.rstrip('\n') for line in enabled_file])
-            else:
-               enabled_mods[gameid] = (enabled_mods_path, [])
-            if gameid in mod_changes:
-               for mod,enabled in mod_changes[gameid].items():
-                  if enabled and mod not in enabled_mods:
-                     print(f'Enabling {gameid} mod {mod}')
-                     enabled_mods[gameid][1].append(mod)
-                  elif not enabled and mod in enabled_mods:
-                     print(f'Disabling {gameid} mod {mod}')
-                     enabled_mods[gameid][1].remove(mod)
-            last_build = settings['last_build'].get(gameid, [])
-            if enabled_mods[gameid][1] != last_build:
-               rebuild.add(gameid)
-               with open(enabled_mods_path, 'w', encoding='utf-8') as enabled_file:
-                  for line in enabled_mods[gameid][1]:
-                     enabled_file.write(line + '\n')
-         for gameid in rebuild:      
-            data_folder = os.path.join(openkh_folder, 'data', gameid)
-            source_folder = os.path.join(kh_folder, 'Image/en')
-            restore_folder(kh_folder)
-            if not os.path.exists(data_folder):
-               print(f'Extracting {gameid} data (this will take some time)')
-               for file in os.listdir(source_folder):
-                  if file.startswith(f'{gameid}_') and os.path.splitext(file)[1] == '.hed':
-                     run_program([os.path.join(openkh_folder, 'OpenKh.Command.IdxImg.exe'), 'hed', 'extract', '-n', '-o', convert_path(data_folder), convert_path(os.path.join(source_folder, file))])
-               for file in os.listdir(os.path.join(data_folder, 'original')):
-                  shutil.move(os.path.join(data_folder, 'original', file), data_folder)
-            print(f'Building {gameid} mods')
-            run_program([os.path.join(openkh_folder, 'OpenKh.Command.IdxImg.exe'), 'hed', 'build', '-g', gameid, '-o', convert_path(os.path.join(built_mods_folder, gameid)), '-e', convert_path(enabled_mods[gameid][0]), '-f', convert_path(os.path.join(mods_folder, gameid)), '-d', convert_path(data_folder)])
-            patch_folder = os.path.join(openkh_folder, 'patched')
-            if settings['mods'].get('panacea') != True:
-               backup_folder = os.path.join(kh_folder, 'BackupImage')
-               source_folder = os.path.join(kh_folder, 'Image/en')
-               print(f'Patching {gameid} mods')
-               run_program([os.path.join(openkh_folder, 'OpenKh.Command.IdxImg.exe'), 'hed', 'full-patch', '-b', convert_path(os.path.join(built_mods_folder, gameid)), '-o', convert_path(patch_folder), '-f', convert_path(source_folder)])
-               os.makedirs(backup_folder, exist_ok=True)
-               for file in os.listdir(patch_folder):
-                  backup_path = os.path.join(backup_folder, file)
-                  write_path = os.path.join(source_folder, file)
-                  if not os.path.exists(backup_path):
-                     shutil.copyfile(write_path, backup_path)
-                  shutil.copyfile(os.path.join(patch_folder, file), write_path)
-               shutil.rmtree(patch_folder)
-            settings['last_build'][gameid] = enabled_mods[gameid][1]
-      
-      if kh15_folder is not None:
-         handle_games(kh15_folder, [('kh1', 'KH1'), ('kh2', 'KH2'), ('bbs', 'BBS'), ('Recom', 'ReCoM')])
-      if kh28_folder is not None:
-         handle_games(kh28_folder, [('kh3d', 'KH3D')])
-   
-   if (lua_folder := settings['mods'].get('luabackend')) is not None:
-      if settings['mods']['update_luabackend'] == True or not os.path.exists(lua_folder):
-         print('Checking for LuaBackend updates...')
-         download_latest(settings, settings_path, 'luabackend', 'https://api.github.com/repos/Sirius902/LuaBackend/releases/latest', lambda x: x['name'] == 'DBGHELP.zip', False, lua_folder)
-      toml_user = settings['mods'].get('luabackend_config')
-      toml_default = os.path.join(lua_folder, 'LuaBackend.toml')
-      if os.path.exists(toml_default):
-         if toml_user is not None:
-            if not os.path.exists(toml_user):
-               print('Creating default LuaBackend.toml configuration')
-               shutil.copyfile(toml_default, toml_user)
-         else:
-            for folder in [kh15_folder, kh28_folder]:
-               if folder is not None:
-                  shutil.copyfile(toml_default, os.path.join(kh15_folder, kh28_folder))
-         os.remove(toml_default)
-      for folder in [kh15_folder, kh28_folder]:
-         if folder is None:
-            continue
-         if is_linux:
-            symlinks.make(os.path.join(folder, 'DINPUT8.dll'), os.path.join(lua_folder, 'DBGHELP.dll'), False)
-         else:
-            if openkh_folder is not None:
-               symlinks.make(os.path.join(folder, 'LuaBackend.dll'), os.path.join(lua_folder, 'DBGHELP.dll'), False)
-            else:
-               symlinks.make(os.path.join(folder, 'DBGHELP.dll'), os.path.join(lua_folder, 'DBGHELP.dll'), False)
-         symlinks.make(os.path.join(folder, 'lua54.dll'), os.path.join(lua_folder, 'lua54.dll'), False)
-         if toml_user is not None:
-            symlinks.make(os.path.join(folder, 'LuaBackend.toml'), toml_user, False)
-      if openkh_folder is not None:
-         for folder in [kh15_folder, kh28_folder]:
-            if folder is None:
-               continue
-            toml_path = os.path.join(folder, 'LuaBackend.toml')
-            with open(toml_path, 'r', encoding='utf-8') as toml_file:
-               toml_data = tomlkit.load(toml_file)
-            changes = False
-            for game in ['kh1', 'kh2', 'bbs', 'recom', 'kh3d']:
-               gamedata = toml_data.get(game)
-               if gamedata is not None:
-                  scripts = gamedata.get('scripts')
-                  if scripts is not None:
-                     path = os.path.join(openkh_folder, 'mod', game, 'scripts') 
-                     windows_path = convert_path(path)
-                     found = False
-                     for script in scripts:
-                        if 'openkh' in script and script['openkh'] == True:
-                           found = True
-                           if script['path'] != windows_path:
-                              script['path'] = windows_path
-                              print(f'Adding OpenKH scripts folder \'{path}\' to LuaBackend configuration')
-                              changes = True
-                           break
-                     if not found:
-                        changes = True
-                        print(f'Adding OpenKH scripts folder \'{path}\' to LuaBackend configuration')
-                        scripts.append({'path':windows_path,'relative':False,'openkh':True})
-            if changes:
-               with open(toml_user, 'w', encoding='utf-8') as toml_file:
-                  tomlkit.dump(toml_data, toml_file)
+   for game in settings.games.get_all():
+      for exe in game.get_exes():
+         environment.make_launch(game, exe, settings)
    
    symlinks.commit()
 
-   make_launch('kh1', kh15_folder, True, True, False)
-   make_launch('kh2', kh15_folder, True, True, True)
-   make_launch('khrecom', kh15_folder, True, True, False)
-   make_launch('khbbs', kh15_folder, True, True, False)
-   make_launch('khddd', kh28_folder, False, True, False)
-   make_launch('kh0.2', kh28_folder, False, False, False)
-   make_launch('kh3', kh3_folder, False, False, False)
-   make_launch('khmom', khmom_folder, False, False, False)
-
-def set_data(data: dict[str, typing.Any], key: str, value: typing.Any) -> bool:
+def set_data(data, key: str, value: typing.Any) -> bool:
    current = data.get(key)
    data[key] = value
    if value != current:
@@ -205,7 +85,7 @@ class Environment:
    @abc.abstractmethod
    def run_program(self, args: list[str]) -> subprocess.CompletedProcess: pass
    @abc.abstractmethod
-   def make_launch(self, name, folder, has_panacea, has_luabackend): pass
+   def make_launch(self, game: KhGame, exe: LaunchExe, settings: Settings): pass
    @abc.abstractmethod
    @classmethod
    def is_linux(cls) -> bool: pass
@@ -220,8 +100,18 @@ class WindowsEnvironment(Environment):
    def run_program(self, args: list[str]) -> subprocess.CompletedProcess:
       return subprocess.run(args, check=True)
    
-   def make_launch(self, name, folder, has_panacea, has_luabackend):
-      return
+   def make_launch(self, game: KhGame, exe: LaunchExe, settings: Settings):
+      if exe.launch is None:
+         return
+      exe.launch.parent.mkdir(parents=True, exist_ok=True)
+      with open(exe.launch, 'w', encoding='utf-8') as sh_file:
+         exe_path = exe.exe.relative_to(game.folder)
+         sh_file.writelines([
+            f'cd /d "{game.folder}" || exit 1\n',
+            f'{exe_path}\n'
+         ])
+      filestat = exe.launch.stat()
+      exe.launch.chmod(filestat.st_mode | stat.S_IEXEC)
    
    @classmethod
    def is_linux(cls) -> bool:
@@ -230,6 +120,7 @@ class WindowsEnvironment(Environment):
 class LinuxEnvironment(Environment):
    def __init__(self, settings: Settings):
       assert settings.wineprefix is not None
+      self.wineprefix = settings.wineprefix
       self.wine_env = dict(os.environ, WINEPREFIX=str(settings.wineprefix))
       self.user_folder = settings.wineprefix / 'drive_c/users' / os.getlogin()
       
@@ -252,31 +143,33 @@ class LinuxEnvironment(Environment):
          env=self.wine_env
       )
       
-   def make_launch(self, name, folder, has_panacea, has_luabackend):
-      if folder is None:
+   def make_launch(self, game: KhGame, exe: LaunchExe, settings: Settings):
+      if exe.launch is None:
          return
-      path = settings['launch'].get(name)
-      if path is None:
-         return 
-      exe = settings['installs'].get(name + '.exe')
-      if exe is None:
-         return
-      os.makedirs(os.path.dirname(path), exist_ok=True)
-      env_vars = [f'WINEPREFIX="{wineprefix}"','WINEFSYNC=1','WINE_FULLSCREEN_FSR=1','WINEDEBUG=-all']
-      dlls = []
-      if has_panacea and settings['mods'].get('panacea') == True:
-         dlls.append('version=n,b')
-      if has_luabackend and settings['mods'].get('luabackend') is not None:
-         dlls.append('dinput8=n,b')
-      if len(dlls) > 0:
-         env_vars.append(f'WINEDLLOVERRIDES="{";".join(dlls)}"')
-      gameid = {'kh1':'umu-2552430','kh2':'umu-2552430','khrecom':'umu-2552430','khbbs':'umu-2552430','khddd':'umu-2552430','kh0.2':'umu-2552450','kh3':'umu-2552450','khmom':'umu-2552430'}
-      env_vars.append(f'GAMEID="{gameid[name]}"')
-      env_vars.append('STORE="egs"')
-      with open(path, 'w', encoding='utf-8') as sh_file:
-         sh_file.write(f'#!/bin/sh\ncd "{folder}" || exit 1\n{" ".join(env_vars)} exec umu-run "{exe}"\n')
-      st = os.stat(path)
-      os.chmod(path, st.st_mode | stat.S_IEXEC)
+      exe.launch.parent.mkdir(parents=True, exist_ok=True)
+      env_vars: dict[str, str] = {
+         'WINEPREFIX': str(self.wineprefix),
+         'WINEFSYNC': '1',
+         'WINE_FULLSCREEN_FSR': '1',
+         'WINEDEBUG': '-all'
+      }
+      dlls: dict[str, str] = {
+         'version': 'n,b',
+         'dinput8': 'n,b'
+      }
+      env_vars['WINEDLLOVERRIDES'] = ';'.join(f'{key}={value}' for key, value in dlls.items())
+      env_vars['GAMEID'] = game.umu_id()
+      env_vars['STORE'] = {'steam': 'steam', 'epic': 'egs'}[settings.store]
+      with open(exe.launch, 'w', encoding='utf-8') as sh_file:
+         vars = ' '.join(f'{key}="{value}"' for key, value in env_vars.items())
+         exe_path = exe.exe.relative_to(game.folder)
+         sh_file.writelines([
+            '#!/bin/sh\n',
+            f'cd "{game.folder}" || exit 1\n',
+            f'{vars} exec umu-run {exe_path}\n'
+         ])
+      filestat = exe.launch.stat()
+      exe.launch.chmod(filestat.st_mode | stat.S_IEXEC)
       
    @classmethod
    def is_linux(cls) -> bool:
@@ -394,7 +287,7 @@ def check_saves(symlinks: Symlinks, environment: Environment, settings: Settings
          symlinks.remove(environment.user_folder / 'Documents/Kingdom Hearts/Configuration')
          symlinks.remove(environment.user_folder / 'Documents/Kingdom Hearts/Save Data')
 
-def check_openkh(openkh: OpenKh, symlinks: Symlinks, environment: Environment, settings: Settings, settings_path: pathlib.Path):
+def check_openkh(openkh: OpenKh, symlinks: Symlinks, environment: Environment, settings: Settings, settings_path: pathlib.Path) -> dict[str, typing.Any]:
    print('Checking OpenKh')
    default_manager_settings = openkh.folder / 'mods-manager.yml'
    manager_settings = openkh.settings if openkh.settings is not None else default_manager_settings
@@ -402,10 +295,10 @@ def check_openkh(openkh: OpenKh, symlinks: Symlinks, environment: Environment, s
       print('Checking for OpenKh updates...')
       downloaded = download_latest(
          last_date = openkh.update if isinstance(openkh.update, datetime.datetime) else None,
-         name = 'openkh',
          url = 'https://api.github.com/repos/OpenKH/OpenKh/releases/tags/latest',
-         predicate = lambda x: x['name'] == 'openkh.zip',
+         asset_filter = lambda x: x['name'] == 'openkh.zip',
          has_extra_folder = True,
+         extract_filter = None,
          destination_folder = openkh.folder
       )
       if downloaded is not None:
@@ -446,6 +339,8 @@ def check_openkh(openkh: OpenKh, symlinks: Symlinks, environment: Environment, s
          mgr_data = {
             'wizardVersionNumber': 1,
             'gameEdition': 2,
+            'gameModPath': openkh.folder / 'mod',
+            'gameDataPath': openkh.folder / 'data'
          }
          yaml.dump(mgr_data, mods_file)
    with open(manager_settings, 'r', encoding='utf-8') as mods_file:
@@ -481,15 +376,15 @@ def check_openkh(openkh: OpenKh, symlinks: Symlinks, environment: Environment, s
       with open(openkh.panacea.settings, 'r', encoding='utf-8') as mods_file:
          pana_data = dict(line.rstrip('\n').split('=', 1) for line in mods_file.readlines())
       changed = False
-      path = mgr_data.get('gameModPath', openkh.folder / 'mod')
+      path = pathlib.Path(mgr_data['gameModPath'])
       changed |= set_data(pana_data, 'mod_path', environment.convert_path(path))
       if changed:
          with open(openkh.panacea.settings, 'r', encoding='utf-8') as mods_file:
             mods_file.writelines([f'{key}={value}\n' for key, value in pana_data.items()])
-            
+   
+   rebuild: set[str] = set()            
    if openkh.update_mods:
       print('Updating mods')
-      rebuild: set[str] = set()
       mods_folder = openkh.mods if openkh.mods is not None else openkh.folder / 'mods'
       if mods_folder.exists():
          for game in mods_folder.iterdir():
@@ -517,18 +412,39 @@ def check_openkh(openkh: OpenKh, symlinks: Symlinks, environment: Environment, s
                      if old_hash != new_hash:
                         rebuild.add(game.name)
 
-def check_luabackend(luabackend: Luabackend, symlinks: Symlinks, environment: Environment, settings: Settings, settings_path: pathlib.Path):
+   if settings.games.kh15_25 is not None:
+      mod_game(settings.games.kh15_25, {'kh1': 'KH1', 'kh2': 'KH2', 'bbs': 'BBS', 'Recom': 'ReCoM'}, rebuild, openkh, settings, settings_path)
+   if settings.games.kh28 is not None:
+      mod_game(settings.games.kh28, {'kh3d': 'KH3D'}, rebuild, openkh, settings, settings_path)
+   
+   return mgr_data
+
+def mod_game(game: KhGame, ids: dict[str, str], rebuild: set[str], openkh: OpenKh, settings: Settings, settings_path: pathlib.Path):
+   latest_modified: datetime.datetime | None = None
+   for gameid, text in ids.items():
+      enabled_mods_path = openkh.folder / f'mods-{text}.txt'
+      if enabled_mods_path.exists():
+         modified = datetime.datetime.fromtimestamp(enabled_mods_path.stat().st_mtime)
+         if latest_modified is None or modified > latest_modified:
+            latest_modified = modified
+            if openkh.last_build is None or modified > openkh.last_build:
+               rebuild.add(gameid)
+   for gameid in rebuild:
+      pass
+   if openkh.last_build is None or (latest_modified is not None and latest_modified > openkh.last_build):
+      openkh.last_build = latest_modified
+      save_settings(settings, settings_path)
+
+def check_luabackend(luabackend: Luabackend, openkh_settings: dict[str, typing.Any] | None, symlinks: Symlinks, environment: Environment, settings: Settings, settings_path: pathlib.Path):
    print('Checking luabackend')
    if (luabackend.update != False) or not luabackend.folder.exists():
       print('Checking for luabackend updates...')
-      # exclude luabackend.toml
-      # symlink the dll correctly
       downloaded = download_latest(
          last_date = luabackend.update if isinstance(luabackend.update, datetime.datetime) else None,
-         name = 'luabackend',
          url = 'https://api.github.com/repos/Sirius902/LuaBackend/releases/latest',
-         predicate = lambda x: x['name'] == 'DBGHELP.zip',
+         asset_filter = lambda x: x['name'] == 'DBGHELP.zip',
          has_extra_folder = False,
+         extract_filter = lambda x: x.name != 'LuaBackend.toml',
          destination_folder = luabackend.folder
       )
       if downloaded is not None:
@@ -538,8 +454,59 @@ def check_luabackend(luabackend: Luabackend, symlinks: Symlinks, environment: En
    if not luabackend.settings.exists():
       print('Creating default luabackend settings')
       with open(luabackend.settings, 'w', encoding='utf-8') as mods_file:
-         mgr_data = {}
-         tomlkit.dump(mgr_data, mods_file)
+         data = {
+            'kh1': {'scripts':[{'path':'scripts/kh1/','relative':True}]},
+            'kh2': {'scripts':[{'path':'scripts/kh2/','relative':True}]},
+            'bbs': {'scripts':[{'path':'scripts/bbs/','relative':True}]},
+            'recom': {'scripts':[{'path':'scripts/recom/','relative':True}]},
+            'kh3d': {'scripts':[{'path':'scripts/kh3d/','relative':True}]},
+         }
+         tomlkit.dump(data, mods_file)
+   print('Checking luabackend settings')
+   with open(luabackend.settings, 'r', encoding='utf-8') as mods_file:
+      data = tomlkit.load(mods_file)
+   changed = False
+   def add_openkh(version: str) -> bool:
+      if openkh_settings is None:
+         return False
+      game_folder = pathlib.Path(openkh_settings['gameModPath'])
+      script_path = environment.convert_path(game_folder / version / 'scripts')
+      for entry in data[version]['scripts']:
+         if entry.get('openkh') == True:
+            return set_data(entry, 'path', script_path)
+      data[version]['scripts'].append({'path': script_path, 'relative': False, 'openkh': True})
+      print(f'Added openkh script entry {script_path}')
+      return True
+   if settings.games.kh15_25 is not None:
+      changed |= set_data(data['kh1'], 'exe', environment.convert_path(settings.games.kh15_25.kh1.exe))
+      changed |= set_data(data['kh2'], 'exe', environment.convert_path(settings.games.kh15_25.kh2.exe))
+      changed |= set_data(data['bbs'], 'exe', environment.convert_path(settings.games.kh15_25.khbbs.exe))
+      changed |= set_data(data['recom'], 'exe', environment.convert_path(settings.games.kh15_25.khrecom.exe))
+      path = pathlib.Path(settings.games.kh15_25.saves_folder())
+      if settings.store == 'steam':
+         path = 'My Games' / path
+      for version in ['kh1', 'kh2', 'bbs', 'recom']:
+         changed |= set_data(data[version], 'game_docs', environment.convert_path(path))
+         changed |= add_openkh(version)
+   if settings.games.kh28 is not None:
+      changed |= set_data(data['kh3d'], 'exe', environment.convert_path(settings.games.kh28.khddd.exe))
+      path = pathlib.Path(settings.games.kh28.saves_folder())
+      if settings.store == 'steam':
+         path = 'My Games' / path
+      changed |= set_data(data['kh3d'], 'game_docs', environment.convert_path(path))
+      changed |= add_openkh('kh3d')
+   if changed:
+      with open(luabackend.settings, 'w', encoding='utf-8') as mods_file:
+         tomlkit.dump(data, mods_file)
+   for game in settings.games.get_classic():
+      symlinks.make(game.folder / 'LuaBackend.toml', luabackend.settings, is_dir=False)
+      if environment.is_linux():
+         symlinks.make(game.folder / 'DINPUT8.dll', luabackend.folder / 'DBGHELP.dll', is_dir=False)
+      else:
+         if settings.mods.openkh is None:
+            symlinks.make(game.folder / 'DBGHELP.dll', luabackend.folder / 'DBGHELP.dll', is_dir=False)
+         else:
+            symlinks.make(game.folder / 'LuaBackend.dll', luabackend.folder / 'DBGHELP.dll', is_dir=False)
 
 def check_randomizer(randomizer: Randomizer, settings: Settings, settings_path: pathlib.Path):
    print('Checking randomizer')
@@ -547,10 +514,10 @@ def check_randomizer(randomizer: Randomizer, settings: Settings, settings_path: 
       print('Checking for randomizer updates...')
       downloaded = download_latest(
          last_date = randomizer.update if isinstance(randomizer.update, datetime.datetime) else None,
-         name = 'randomizer',
          url = 'https://api.github.com/repos/tommadness/KH2Randomizer/releases/latest',
-         predicate = lambda x: x['name'] == 'Kingdom.Hearts.II.Final.Mix.Randomizer.zip',
+         asset_filter = lambda x: x['name'] == 'Kingdom.Hearts.II.Final.Mix.Randomizer.zip',
          has_extra_folder = False,
+         extract_filter = None,
          destination_folder = randomizer.folder
       )
       if downloaded is not None:
@@ -560,10 +527,10 @@ def check_randomizer(randomizer: Randomizer, settings: Settings, settings_path: 
 
 def download_latest(
    last_date: datetime.datetime | None,
-   name: str,
    url: str,
-   predicate: typing.Callable[[dict[str, typing.Any]], bool],
+   asset_filter: typing.Callable[[dict[str, typing.Any]], bool],
    has_extra_folder: bool,
+   extract_filter: typing.Callable[[pathlib.Path], bool] | None,
    destination_folder: pathlib.Path
 ) -> datetime.datetime | None:
    response = requests.get(url, timeout=10)
@@ -591,7 +558,7 @@ def download_latest(
       release = json.loads(response.text)
       assert release is not None
    for asset in release['assets']:
-      if not predicate(asset):
+      if not asset_filter(asset):
          continue
       asset_date = datetime.datetime.fromisoformat(asset['updated_at'].replace('Z', '+00:00'))
       if last_date is None or asset_date > last_date or not os.path.exists(destination_folder):
@@ -605,19 +572,30 @@ def download_latest(
             return None
          with tempfile.TemporaryDirectory() as temp_folder:
             temp_folder_path = pathlib.Path(temp_folder)
-            temp_zip = temp_folder_path / f'{name}.zip'
+            temp_zip = temp_folder_path / 'archive.zip'
             with open(temp_zip, 'wb') as file:
                file.write(response.content)
             os.makedirs(destination_folder, exist_ok=True)
             if has_extra_folder:
-               temp_extract = temp_folder_path / name
+               temp_extract = temp_folder_path / 'extract'
                os.makedirs(temp_extract, exist_ok=True)
-               pyunpack.Archive(str(temp_zip)).extractall(str(temp_extract))
+               extract_with_filter(temp_zip, temp_extract, extract_filter)
                shutil.copytree(os.path.join(temp_extract, os.listdir(temp_extract)[0]), destination_folder, dirs_exist_ok=True)
             else:
-               pyunpack.Archive(str(temp_zip)).extractall(str(destination_folder))
+               extract_with_filter(temp_zip, destination_folder, extract_filter)
          return asset_date
    return None
+
+def extract_with_filter(zip_path: pathlib.Path, destination_folder: pathlib.Path, extract_filter: typing.Callable[[pathlib.Path], bool] | None):
+   archive = pyunpack.Archive(str(zip_path))
+   archive.extractall(str(destination_folder))
+   if extract_filter is None:
+      return
+   for root, _folders, files in destination_folder.walk():
+      for file in files:
+         full_file = root / file
+         if not extract_filter(full_file):
+            full_file.unlink()
 
 if __name__ == '__main__':
    main()

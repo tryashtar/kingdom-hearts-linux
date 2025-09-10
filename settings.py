@@ -11,7 +11,7 @@ StoreKind = typing.Literal['epic', 'steam']
 class LaunchExe:
    exe: pathlib.Path
    launch: typing.Optional[pathlib.Path]
-   
+
 @dataclasses.dataclass
 class KhGame:
    saves: typing.Optional[pathlib.Path]
@@ -19,6 +19,11 @@ class KhGame:
    @abc.abstractmethod
    @classmethod
    def saves_folder(cls) -> str: pass
+   @abc.abstractmethod
+   @classmethod
+   def umu_id(cls) -> str: pass
+   @abc.abstractmethod
+   def get_exes(self) -> list[LaunchExe]: pass
 
 @dataclasses.dataclass
 class Kh1525(KhGame):
@@ -31,6 +36,13 @@ class Kh1525(KhGame):
    def saves_folder(cls) -> str:
       return 'KINGDOM HEARTS HD 1.5+2.5 ReMIX'
 
+   @classmethod
+   def umu_id(cls) -> str:
+      return 'umu-2552430'
+   
+   def get_exes(self) -> list[LaunchExe]:
+      return [game for game in [self.kh1, self.kh2, self.khrecom, self.khbbs] if game is not None]
+
 @dataclasses.dataclass
 class Kh28(KhGame):
    khddd: LaunchExe
@@ -39,6 +51,13 @@ class Kh28(KhGame):
    @classmethod
    def saves_folder(cls) -> str:
       return 'KINGDOM HEARTS HD 2.8 Final Chapter Prologue'
+   
+   @classmethod
+   def umu_id(cls) -> str:
+      return 'umu-2552430'
+   
+   def get_exes(self) -> list[LaunchExe]:
+      return [game for game in [self.khddd, self.kh02] if game is not None]
 
 @dataclasses.dataclass
 class Kh3(KhGame):
@@ -47,6 +66,13 @@ class Kh3(KhGame):
    @classmethod
    def saves_folder(cls) -> str:
       return 'KINGDOM HEARTS III'
+   
+   @classmethod
+   def umu_id(cls) -> str:
+      return 'umu-2552450'
+   
+   def get_exes(self) -> list[LaunchExe]:
+      return [game for game in [self.kh3] if game is not None]
 
 @dataclasses.dataclass
 class KhMom(KhGame):
@@ -55,6 +81,13 @@ class KhMom(KhGame):
    @classmethod
    def saves_folder(cls) -> str:
       return 'KINGDOM HEARTS Melody of Memory'
+   
+   @classmethod
+   def umu_id(cls) -> str:
+      return 'umu-2552430'
+   
+   def get_exes(self) -> list[LaunchExe]:
+      return [game for game in [self.khmom] if game is not None]
 
 @dataclasses.dataclass
 class Games:
@@ -81,7 +114,7 @@ class OpenKh:
    panacea: typing.Optional[Panacea]
    update_mods: bool
    update: bool | datetime.datetime
-   last_build: dict[str, list[str]]
+   last_build: typing.Optional[datetime.datetime]
 
 @dataclasses.dataclass
 class Luabackend:
