@@ -79,7 +79,8 @@ def restore_folder(source: pathlib.Path, backup: pathlib.Path):
       shutil.rmtree(backup)
 
 class Environment:
-   user_folder: pathlib.Path
+   @abc.abstractmethod
+   def user_folder(self, game: KhGame) -> pathlib.Path: pass
    @abc.abstractmethod
    def convert_path(self, path: pathlib.Path) -> pathlib.Path: pass
    @abc.abstractmethod
@@ -91,8 +92,8 @@ class Environment:
    def is_linux(cls) -> bool: pass
 
 class WindowsEnvironment(Environment):
-   def __init__(self):
-      self.user_folder = pathlib.Path.home()
+   def user_folder(self, game: KhGame) -> pathlib.Path:
+      return pathlib.Path.home()
    
    def convert_path(self, path: pathlib.Path) -> pathlib.Path:
       return path
@@ -118,12 +119,13 @@ class WindowsEnvironment(Environment):
       return False
 
 class LinuxEnvironment(Environment):
-   def __init__(self, settings: Settings):
-      assert settings.wineprefix is not None
-      self.wineprefix = settings.wineprefix
-      self.wine_env = dict(os.environ, WINEPREFIX=str(settings.wineprefix))
-      self.user_folder = settings.wineprefix / 'drive_c/users' / os.getlogin()
-      
+   def user_folder(self, game: KhGame) -> pathlib.Path:
+      assert game.wineprefix is not None
+      return game.wineprefix / 'drive_c/users' / os.getlogin()
+   
+   def wine_env(self, prefix: pathlib.Path):
+      return dict(os.environ, WINEPREFIX=str(prefix))
+   
    def convert_path(self, path: pathlib.Path) -> pathlib.Path:
       result = subprocess.run(
          ['winepath', '-w', str(path)],
@@ -146,9 +148,10 @@ class LinuxEnvironment(Environment):
    def make_launch(self, game: KhGame, exe: LaunchExe, settings: Settings):
       if exe.launch is None:
          return
+      assert game.wineprefix is not None
       exe.launch.parent.mkdir(parents=True, exist_ok=True)
       env_vars: dict[str, str] = {
-         'WINEPREFIX': str(self.wineprefix),
+         'WINEPREFIX': str(game.wineprefix),
          'WINEFSYNC': '1',
          'WINE_FULLSCREEN_FSR': '1',
          'WINEDEBUG': '-all'
@@ -166,7 +169,7 @@ class LinuxEnvironment(Environment):
          sh_file.writelines([
             '#!/bin/sh\n',
             f'cd "{game.folder}" || exit 1\n',
-            f'{env} exec umu-run "{exe_path}"\n'
+            f'{env} exec wine "{exe_path}"\n'
          ])
       filestat = exe.launch.stat()
       exe.launch.chmod(filestat.st_mode | stat.S_IEXEC)
@@ -179,43 +182,60 @@ def get_environment(settings: Settings) -> Environment:
    is_linux = platform.system() == 'Linux'
    if is_linux:
       print('Linux detected')
-      assert settings.wineprefix is not None
-      environment = LinuxEnvironment(settings)
-      # should we do steamuser?
-      if not environment.user_folder.exists():
-         print('Creating wineprefix')
-         subprocess.run(
-            ['wineboot'],
-            check=True,
-            env=environment.wine_env
-         )
-         docs_folder = environment.user_folder / 'Documents'
+      environment = LinuxEnvironment()
+      for game in settings.games.get_all():
+         assert game.wineprefix is not None
+         user_folder = environment.user_folder(game)
+         if not user_folder.exists():
+            print('Creating wineprefix')
+            subprocess.run(
+               ['wineboot'],
+               check=True,
+               env=environment.wine_env(game.wineprefix)
+            )
+         docs_folder = user_folder / 'Documents'
          if docs_folder.is_symlink():
             print('Unlinking new documents folder')
             docs_folder.unlink()
-      winetricks: list[str] = []
-      winetricks_log = settings.wineprefix / 'winetricks.log'
-      if winetricks_log.exists():
-         with open(winetricks_log, 'r', encoding='utf-8') as winetricks_file:
-            winetricks = [line.rstrip('\n') for line in winetricks_file]
-      if len(settings.games.get_classic()) > 0 and 'dotnet48' not in winetricks:
-         print('Installing dotnet48 to wineprefix')
-         subprocess.run(
-            ['winetricks', '-q', 'dotnet48'],
-            check=True,
-            env=environment.wine_env
-         )
-      if settings.games.kh3 is not None and 'wmp11' not in winetricks:
-         print('Installing wmp11 to wineprefix')
-         subprocess.run(
-            ['winetricks', '-q', 'wmp11'],
-            check=True,
-            env=environment.wine_env
-         )
+      for game in settings.games.get_classic():
+         assert game.wineprefix is not None
+         winetricks = get_winetricks(game.wineprefix)
+         if 'vkd3d' not in winetricks:
+            print('Installing vkd3d to wineprefix')
+            subprocess.run(
+               ['winetricks', '-q', 'vkd3d'],
+               check=True,
+               env=environment.wine_env(game.wineprefix)
+            )
+         if 'dxvk' not in winetricks:
+            print('Installing dxvk to wineprefix')
+            subprocess.run(
+               ['winetricks', '-q', 'dxvk'],
+               check=True,
+               env=environment.wine_env(game.wineprefix)
+            )
+      if settings.games.kh3 is not None:
+         assert settings.games.kh3.wineprefix is not None
+         winetricks = get_winetricks(settings.games.kh3.wineprefix)
+         if 'wmp11' not in winetricks:
+            print('Installing wmp11 to wineprefix')
+            subprocess.run(
+               ['winetricks', '-q', 'wmp11'],
+               check=True,
+               env=environment.wine_env(settings.games.kh3.wineprefix)
+            )
       return environment
    else:
       print('Windows detected')
       return WindowsEnvironment()
+
+def get_winetricks(prefix: pathlib.Path) -> list[str]:
+   winetricks: list[str] = []
+   winetricks_log = prefix / 'winetricks.log'
+   if winetricks_log.exists():
+      with open(winetricks_log, 'r', encoding='utf-8') as winetricks_file:
+         winetricks = [line.rstrip('\n') for line in winetricks_file]
+   return winetricks
 
 class Symlinks:
    def __init__(self):
@@ -251,14 +271,14 @@ def handle_saves(game: KhGame, symlinks: Symlinks, environment: Environment, set
    if game.saves is not None:
       game.saves.mkdir(parents=True, exist_ok=True)
       if settings.epic_id is not None and settings.store == 'epic':
-         symlinks.make(environment.user_folder / 'Documents' / path_part / 'Epic Games Store' / str(settings.epic_id), game.saves, True)
+         symlinks.make(environment.user_folder(game) / 'Documents' / path_part / 'Epic Games Store' / str(settings.epic_id), game.saves, True)
       if settings.steam_id is not None and settings.store == 'steam':
-         symlinks.make(environment.user_folder / 'Documents/My Games' / path_part / 'Steam' / str(settings.steam_id), game.saves, True)
+         symlinks.make(environment.user_folder(game) / 'Documents/My Games' / path_part / 'Steam' / str(settings.steam_id), game.saves, True)
    else:
       if settings.epic_id is not None:
-         symlinks.remove(environment.user_folder / 'Documents' / path_part / 'Epic Games Store' / str(settings.epic_id))
+         symlinks.remove(environment.user_folder(game) / 'Documents' / path_part / 'Epic Games Store' / str(settings.epic_id))
       if settings.steam_id is not None:
-         symlinks.remove(environment.user_folder / 'Documents/My Games' / path_part / 'Steam' / str(settings.epic_id))
+         symlinks.remove(environment.user_folder(game) / 'Documents/My Games' / path_part / 'Steam' / str(settings.epic_id))
 
 def check_saves(symlinks: Symlinks, environment: Environment, settings: Settings):
    print('Checking save folders')
@@ -266,11 +286,11 @@ def check_saves(symlinks: Symlinks, environment: Environment, settings: Settings
       handle_saves(game, symlinks, environment, settings)
    if settings.games.kh15_25 is not None:
       if (save := settings.games.kh15_25.saves) and settings.mods.refined is not None:
-         symlinks.make(environment.user_folder / 'Documents/Kingdom Hearts/Configuration', save, True)
-         symlinks.make(environment.user_folder / 'Documents/Kingdom Hearts/Save Data', save, True)
+         symlinks.make(environment.user_folder(settings.games.kh15_25) / 'Documents/Kingdom Hearts/Configuration', save, True)
+         symlinks.make(environment.user_folder(settings.games.kh15_25) / 'Documents/Kingdom Hearts/Save Data', save, True)
       else:
-         symlinks.remove(environment.user_folder / 'Documents/Kingdom Hearts/Configuration')
-         symlinks.remove(environment.user_folder / 'Documents/Kingdom Hearts/Save Data')
+         symlinks.remove(environment.user_folder(settings.games.kh15_25) / 'Documents/Kingdom Hearts/Configuration')
+         symlinks.remove(environment.user_folder(settings.games.kh15_25) / 'Documents/Kingdom Hearts/Save Data')
 
 def check_openkh(openkh: OpenKh, symlinks: Symlinks, environment: Environment, settings: Settings, settings_path: pathlib.Path) -> dict[str, typing.Any]:
    print('Checking OpenKh')
