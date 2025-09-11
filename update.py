@@ -25,10 +25,10 @@ def main():
    
    check_saves(symlinks, environment, settings)
    
-   if settings.games.kh15_25 is not None:
-      symlinks.remove(settings.games.kh15_25.folder / 'reFined.cfg')
-      if settings.mods.refined is not None:
-         symlinks.make(settings.games.kh15_25.folder / 'reFined.cfg', settings.mods.refined.settings, is_dir=False)
+   if (game := settings.games.kh15_25) is not None:
+      symlinks.remove(game.folder / 'reFined.cfg')
+      if (refined := settings.mods.refined) is not None:
+         symlinks.make(game.folder / 'reFined.cfg', refined.settings, is_dir=False)
    
    for game in settings.games.get_classic():
       symlinks.remove(game.folder / 'version.dll')
@@ -40,16 +40,16 @@ def main():
       if settings.mods.openkh is None or settings.mods.openkh.panacea is not None:
          restore_folder(game.folder / 'Image', game.folder / 'Image-BACKUP')
 
-   if settings.mods.openkh is not None:
-      openkh_settings = check_openkh(settings.mods.openkh, symlinks, environment, settings, settings_path)
+   if (openkh := settings.mods.openkh) is not None:
+      openkh_settings = check_openkh(openkh, symlinks, environment, settings, settings_path)
    else:
       openkh_settings = None
 
-   if settings.mods.luabackend is not None:
-      check_luabackend(settings.mods.luabackend, openkh_settings, symlinks, environment, settings, settings_path)
+   if (luabackend := settings.mods.luabackend) is not None:
+      check_luabackend(luabackend, openkh_settings, symlinks, environment, settings, settings_path)
    
-   if settings.mods.randomizer is not None:
-      check_randomizer(settings.mods.randomizer, settings, settings_path)
+   if (randomizer := settings.mods.randomizer) is not None:
+      check_randomizer(randomizer, settings, settings_path)
    
    for game in settings.games.get_all():
       for exe in game.get_exes():
@@ -82,9 +82,9 @@ class Environment:
    @abc.abstractmethod
    def user_folder(self, game: KhGame) -> pathlib.Path: pass
    @abc.abstractmethod
-   def convert_path(self, path: pathlib.Path) -> pathlib.Path: pass
+   def convert_path(self, game: KhGame, path: pathlib.Path) -> pathlib.Path: pass
    @abc.abstractmethod
-   def run_program(self, args: list[str]) -> subprocess.CompletedProcess: pass
+   def run_program(self, game: KhGame, args: list[str]) -> subprocess.CompletedProcess: pass
    @abc.abstractmethod
    def make_launch(self, game: KhGame, exe: LaunchExe, settings: Settings): pass
    @classmethod
@@ -95,10 +95,10 @@ class WindowsEnvironment(Environment):
    def user_folder(self, game: KhGame) -> pathlib.Path:
       return pathlib.Path.home()
    
-   def convert_path(self, path: pathlib.Path) -> pathlib.Path:
+   def convert_path(self, game: KhGame, path: pathlib.Path) -> pathlib.Path:
       return path
    
-   def run_program(self, args: list[str]) -> subprocess.CompletedProcess:
+   def run_program(self, game: KhGame, args: list[str]) -> subprocess.CompletedProcess:
       return subprocess.run(args, check=True)
    
    def make_launch(self, game: KhGame, exe: LaunchExe, settings: Settings):
@@ -123,26 +123,27 @@ class LinuxEnvironment(Environment):
       assert game.wineprefix is not None
       return game.wineprefix / 'drive_c/users' / os.getlogin()
    
-   def wine_env(self, prefix: pathlib.Path):
-      return dict(os.environ, WINEPREFIX=str(prefix))
+   def wine_env(self, game: KhGame):
+      assert game.wineprefix is not None
+      return dict(os.environ, WINEPREFIX=str(game.wineprefix))
    
-   def convert_path(self, path: pathlib.Path) -> pathlib.Path:
+   def convert_path(self, game: KhGame, path: pathlib.Path) -> pathlib.Path:
       result = subprocess.run(
          ['winepath', '-w', str(path)],
          check=True,
          stdout=subprocess.PIPE,
          stderr=subprocess.DEVNULL,
-         env=self.wine_env
+         env=self.wine_env(game)
       ).stdout.decode('utf-8').rstrip('\n')
       return pathlib.Path(result)
 
-   def run_program(self, args: list[str]) -> subprocess.CompletedProcess:
+   def run_program(self, game: KhGame, args: list[str]) -> subprocess.CompletedProcess:
       cmds = ['wine']
       cmds.extend(args)
       return subprocess.run(
          cmds,
          check=True,
-         env=self.wine_env
+         env=self.wine_env(game)
       )
       
    def make_launch(self, game: KhGame, exe: LaunchExe, settings: Settings):
@@ -184,14 +185,13 @@ def get_environment(settings: Settings) -> Environment:
       print('Linux detected')
       environment = LinuxEnvironment()
       for game in settings.games.get_all():
-         assert game.wineprefix is not None
          user_folder = environment.user_folder(game)
          if not user_folder.exists():
             print('Creating wineprefix')
             subprocess.run(
                ['wineboot'],
                check=True,
-               env=environment.wine_env(game.wineprefix)
+               env=environment.wine_env(game)
             )
          docs_folder = user_folder / 'Documents'
          if docs_folder.is_symlink():
@@ -205,14 +205,14 @@ def get_environment(settings: Settings) -> Environment:
             subprocess.run(
                ['winetricks', '-q', 'vkd3d'],
                check=True,
-               env=environment.wine_env(game.wineprefix)
+               env=environment.wine_env(game)
             )
          if 'dxvk' not in winetricks:
             print('Installing dxvk to wineprefix')
             subprocess.run(
                ['winetricks', '-q', 'dxvk'],
                check=True,
-               env=environment.wine_env(game.wineprefix)
+               env=environment.wine_env(game)
             )
       if settings.games.kh3 is not None:
          assert settings.games.kh3.wineprefix is not None
@@ -222,7 +222,7 @@ def get_environment(settings: Settings) -> Environment:
             subprocess.run(
                ['winetricks', '-q', 'wmp11'],
                check=True,
-               env=environment.wine_env(settings.games.kh3.wineprefix)
+               env=environment.wine_env(settings.games.kh3)
             )
       return environment
    else:
@@ -268,29 +268,32 @@ class Symlinks:
 
 def handle_saves(game: KhGame, symlinks: Symlinks, environment: Environment, settings: Settings):
    path_part = game.saves_folder()
+   user_folder = environment.user_folder(game)
+   (epic_id, steam_id, store) = (settings.epic_id, settings.steam_id, settings.store)
    if game.saves is not None:
       game.saves.mkdir(parents=True, exist_ok=True)
-      if settings.epic_id is not None and settings.store == 'epic':
-         symlinks.make(environment.user_folder(game) / 'Documents' / path_part / 'Epic Games Store' / str(settings.epic_id), game.saves, True)
-      if settings.steam_id is not None and settings.store == 'steam':
-         symlinks.make(environment.user_folder(game) / 'Documents/My Games' / path_part / 'Steam' / str(settings.steam_id), game.saves, True)
+      if epic_id is not None and store == 'epic':
+         symlinks.make(user_folder / 'Documents' / path_part / 'Epic Games Store' / str(epic_id), game.saves, True)
+      if steam_id is not None and store == 'steam':
+         symlinks.make(user_folder / 'Documents/My Games' / path_part / 'Steam' / str(steam_id), game.saves, True)
    else:
-      if settings.epic_id is not None:
-         symlinks.remove(environment.user_folder(game) / 'Documents' / path_part / 'Epic Games Store' / str(settings.epic_id))
-      if settings.steam_id is not None:
-         symlinks.remove(environment.user_folder(game) / 'Documents/My Games' / path_part / 'Steam' / str(settings.epic_id))
+      if epic_id is not None:
+         symlinks.remove(user_folder / 'Documents' / path_part / 'Epic Games Store' / str(epic_id))
+      if steam_id is not None:
+         symlinks.remove(user_folder / 'Documents/My Games' / path_part / 'Steam' / str(epic_id))
 
 def check_saves(symlinks: Symlinks, environment: Environment, settings: Settings):
    print('Checking save folders')
    for game in settings.games.get_all():
       handle_saves(game, symlinks, environment, settings)
-   if settings.games.kh15_25 is not None:
-      if (save := settings.games.kh15_25.saves) and settings.mods.refined is not None:
-         symlinks.make(environment.user_folder(settings.games.kh15_25) / 'Documents/Kingdom Hearts/Configuration', save, True)
-         symlinks.make(environment.user_folder(settings.games.kh15_25) / 'Documents/Kingdom Hearts/Save Data', save, True)
+   if (game := settings.games.kh15_25) is not None:
+      user_folder = environment.user_folder(game)
+      if (save := game.saves) is not None and settings.mods.refined is not None:
+         symlinks.make(user_folder / 'Documents/Kingdom Hearts/Configuration', save, True)
+         symlinks.make(user_folder / 'Documents/Kingdom Hearts/Save Data', save, True)
       else:
-         symlinks.remove(environment.user_folder(settings.games.kh15_25) / 'Documents/Kingdom Hearts/Configuration')
-         symlinks.remove(environment.user_folder(settings.games.kh15_25) / 'Documents/Kingdom Hearts/Save Data')
+         symlinks.remove(user_folder / 'Documents/Kingdom Hearts/Configuration')
+         symlinks.remove(user_folder / 'Documents/Kingdom Hearts/Save Data')
 
 def check_openkh(openkh: OpenKh, symlinks: Symlinks, environment: Environment, settings: Settings, settings_path: pathlib.Path) -> dict[str, typing.Any]:
    print('Checking OpenKh')
@@ -357,10 +360,10 @@ def check_openkh(openkh: OpenKh, symlinks: Symlinks, environment: Environment, s
       changed |= set_data(mgr_data, 'gameModPath', str(environment.convert_path(openkh.mods / 'output')))
    changed |= set_data(mgr_data, 'panaceaInstalled', openkh.panacea is not None)
    changed |= set_data(mgr_data, 'pcVersion', {'steam': 'Steam', 'epic': 'EGS'}[settings.store])
-   if settings.games.kh15_25 is not None:
-      changed |= set_data(mgr_data, 'pcReleaseLocation', str(environment.convert_path(settings.games.kh15_25.folder)))
-   if settings.games.kh28 is not None:
-      changed |= set_data(mgr_data, 'pcReleaseLocationKH3D', str(environment.convert_path(settings.games.kh28.folder)))
+   if (game := settings.games.kh15_25) is not None:
+      changed |= set_data(mgr_data, 'pcReleaseLocation', str(environment.convert_path(game, game.folder)))
+   if (game := settings.games.kh28) is not None:
+      changed |= set_data(mgr_data, 'pcReleaseLocationKH3D', str(environment.convert_path(game, game.folder)))
    if changed:
       with open(manager_settings, 'w', encoding='utf-8') as mods_file:
          yaml.dump(mgr_data, mods_file)
@@ -471,35 +474,35 @@ def check_luabackend(luabackend: Luabackend, openkh_settings: dict[str, typing.A
    with open(luabackend.settings, 'r', encoding='utf-8') as mods_file:
       data = tomlkit.load(mods_file)
    changed = False
-   def add_openkh(version: str) -> bool:
+   def add_openkh(game: KhGame, version: str) -> bool:
       if openkh_settings is None:
          return False
       game_folder = pathlib.Path(openkh_settings['gameModPath'])
-      script_path = environment.convert_path(game_folder / version / 'scripts')
+      script_path = environment.convert_path(game, game_folder / version / 'scripts')
       for entry in data[version]['scripts']:
          if entry.get('openkh') == True:
             return set_data(entry, 'path', str(script_path))
       data[version]['scripts'].append({'path': script_path, 'relative': False, 'openkh': True})
       print(f'Added openkh script entry {script_path}')
       return True
-   if settings.games.kh15_25 is not None:
-      changed |= set_data(data['kh1'], 'exe', str(environment.convert_path(settings.games.kh15_25.kh1.exe)))
-      changed |= set_data(data['kh2'], 'exe', str(environment.convert_path(settings.games.kh15_25.kh2.exe)))
-      changed |= set_data(data['bbs'], 'exe', str(environment.convert_path(settings.games.kh15_25.khbbs.exe)))
-      changed |= set_data(data['recom'], 'exe', str(environment.convert_path(settings.games.kh15_25.khrecom.exe)))
-      path = pathlib.Path(settings.games.kh15_25.saves_folder())
+   if (game := settings.games.kh15_25) is not None:
+      changed |= set_data(data['kh1'], 'exe', str(environment.convert_path(game, game.kh1.exe)))
+      changed |= set_data(data['kh2'], 'exe', str(environment.convert_path(game, game.kh2.exe)))
+      changed |= set_data(data['bbs'], 'exe', str(environment.convert_path(game, game.khbbs.exe)))
+      changed |= set_data(data['recom'], 'exe', str(environment.convert_path(game, game.khrecom.exe)))
+      path = pathlib.Path(game.saves_folder())
       if settings.store == 'steam':
          path = 'My Games' / path
       for version in ['kh1', 'kh2', 'bbs', 'recom']:
-         changed |= set_data(data[version], 'game_docs', str(environment.convert_path(path)))
-         changed |= add_openkh(version)
-   if settings.games.kh28 is not None:
-      changed |= set_data(data['kh3d'], 'exe', str(environment.convert_path(settings.games.kh28.khddd.exe)))
-      path = pathlib.Path(settings.games.kh28.saves_folder())
+         changed |= set_data(data[version], 'game_docs', str(environment.convert_path(game, path)))
+         changed |= add_openkh(game, version)
+   if (game := settings.games.kh28) is not None:
+      changed |= set_data(data['kh3d'], 'exe', str(environment.convert_path(game, game.khddd.exe)))
+      path = pathlib.Path(game.saves_folder())
       if settings.store == 'steam':
          path = 'My Games' / path
-      changed |= set_data(data['kh3d'], 'game_docs', str(environment.convert_path(path)))
-      changed |= add_openkh('kh3d')
+      changed |= set_data(data['kh3d'], 'game_docs', str(environment.convert_path(game, path)))
+      changed |= add_openkh(game, 'kh3d')
    if changed:
       with open(luabackend.settings, 'w', encoding='utf-8') as mods_file:
          tomlkit.dump(data, mods_file)
