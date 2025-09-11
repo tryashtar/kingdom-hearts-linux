@@ -26,20 +26,28 @@ def main():
    check_saves(symlinks, environment, settings)
    
    if (game := settings.games.kh15_25) is not None:
-      symlinks.remove(game.folder / 'reFined.cfg')
+      folder = game.get_workspace()
+      symlinks.remove(folder / 'reFined.cfg')
       if (refined := settings.mods.refined) is not None:
-         symlinks.make(game.folder / 'reFined.cfg', refined.settings, is_dir=False)
+         symlinks.make(folder / 'reFined.cfg', refined.settings, is_dir=False)
    
    for game in settings.games.get_classic():
+      folder = game.get_workspace()
       symlinks.remove(game.folder / 'version.dll')
       symlinks.remove(game.folder / 'DINPUT8.dll')
       symlinks.remove(game.folder / 'DBGHELP.dll')
-      symlinks.remove(game.folder / 'LuaBackend.dll')
-      symlinks.remove(game.folder / 'LuaBackend.toml')
-      symlinks.remove(game.folder / 'panacea_settings.txt')
+      symlinks.remove(folder / 'LuaBackend.dll')
+      symlinks.remove(folder / 'LuaBackend.toml')
+      symlinks.remove(folder / 'panacea_settings.txt')
       if settings.mods.openkh is None or settings.mods.openkh.panacea is not None:
          restore_folder(game.folder / 'Image', game.folder / 'Image-BACKUP')
 
+   if (game := settings.games.kh3) is not None:
+      mods = game.folder / 'KINGDOM HEARTS III/Content/Paks/~mods'
+      symlinks.remove(mods)
+      if (kh3 := settings.mods.kh3) is not None:
+         symlinks.make(mods, kh3.folder, is_dir=True)
+   
    if (openkh := settings.mods.openkh) is not None:
       openkh_settings = check_openkh(openkh, symlinks, environment, settings, settings_path)
    else:
@@ -49,7 +57,7 @@ def main():
       check_luabackend(luabackend, openkh_settings, symlinks, environment, settings, settings_path)
    
    if (randomizer := settings.mods.randomizer) is not None:
-      check_randomizer(randomizer, settings, settings_path)
+      check_randomizer(randomizer, settings, settings_path) 
    
    for game in settings.games.get_all():
       for exe in game.get_exes():
@@ -104,12 +112,13 @@ class WindowsEnvironment(Environment):
    def make_launch(self, game: KhGame, exe: LaunchExe, settings: Settings):
       if exe.launch is None:
          return
+      folder = game.get_workspace()
+      folder.mkdir(parents=True, exist_ok=True)
       exe.launch.parent.mkdir(parents=True, exist_ok=True)
       with open(exe.launch, 'w', encoding='utf-8') as sh_file:
-         exe_path = exe.exe.relative_to(game.folder)
          sh_file.writelines([
-            f'cd /d "{game.folder}" || exit 1\n',
-            f'{exe_path}\n'
+            f'cd /d "{folder}" || exit 1\n',
+            f'{exe.exe}\n'
          ])
       filestat = exe.launch.stat()
       exe.launch.chmod(filestat.st_mode | stat.S_IEXEC)
@@ -150,6 +159,8 @@ class LinuxEnvironment(Environment):
       if exe.launch is None:
          return
       assert game.wineprefix is not None
+      folder = game.get_workspace()
+      folder.mkdir(parents=True, exist_ok=True)
       exe.launch.parent.mkdir(parents=True, exist_ok=True)
       env_vars: dict[str, str] = {
          'WINEPREFIX': str(game.wineprefix),
@@ -166,11 +177,10 @@ class LinuxEnvironment(Environment):
       env_vars['STORE'] = {'steam': 'steam', 'epic': 'egs'}[settings.store]
       with open(exe.launch, 'w', encoding='utf-8') as sh_file:
          env = ' '.join(f'{key}="{value}"' for key, value in env_vars.items())
-         exe_path = exe.exe.relative_to(game.folder)
          sh_file.writelines([
             '#!/bin/sh\n',
-            f'cd "{game.folder}" || exit 1\n',
-            f'{env} exec wine "{exe_path}"\n'
+            f'cd "{folder}" || exit 1\n',
+            f'{env} exec wine "{exe.exe}"\n'
          ])
       filestat = exe.launch.stat()
       exe.launch.chmod(filestat.st_mode | stat.S_IEXEC)
@@ -380,10 +390,10 @@ def check_openkh(openkh: OpenKh, symlinks: Symlinks, environment: Environment, s
    if openkh.panacea is not None:
       print('Checking panacea')
       for game in settings.games.get_classic():
+         folder = game.get_workspace()
          dll = 'version.dll' if environment.is_linux() else 'DBGHELP.dll'
          symlinks.make(game.folder / dll, openkh.folder / 'OpenKH.Panacea.dll', is_dir=False)
-         symlinks.make(game.folder / dll, openkh.folder / 'OpenKH.Panacea.dll', is_dir=False)
-         symlinks.make(game.folder / 'panacea_settings.txt', openkh.panacea.settings, is_dir=False)
+         symlinks.make(folder / 'panacea_settings.txt', openkh.panacea.settings, is_dir=False)
       if not openkh.panacea.settings.exists():
          print('Creating default panacea settings')
          with open(openkh.panacea.settings, 'w', encoding='utf-8') as mods_file:
@@ -486,9 +496,9 @@ def check_luabackend(luabackend: Luabackend, openkh_settings: dict[str, typing.A
    def add_scripts(key: str, game: KhGame, version: str, path: pathlib.Path):
       script_path = environment.convert_path(game, path)
       for entry in data[version]['scripts']:
-         if entry.get(key) == True:
+         if entry.get('key') == key:
             return set_data(entry, 'path', str(script_path))
-      data[version]['scripts'].append({'path': str(script_path), 'relative': False, key: True})
+      data[version]['scripts'].append({'path': str(script_path), 'relative': False, 'key': key})
       print(f'Added {key} script entry {path}')
       return True
    def add_openkh(game: KhGame, version: str) -> bool:
@@ -524,14 +534,15 @@ def check_luabackend(luabackend: Luabackend, openkh_settings: dict[str, typing.A
       with open(luabackend.settings, 'w', encoding='utf-8') as mods_file:
          tomlkit.dump(data, mods_file)
    for game in settings.games.get_classic():
-      symlinks.make(game.folder / 'LuaBackend.toml', luabackend.settings, is_dir=False)
+      folder = game.get_workspace()
+      symlinks.make(folder / 'LuaBackend.toml', luabackend.settings, is_dir=False)
       if environment.is_linux():
          symlinks.make(game.folder / 'DINPUT8.dll', luabackend.folder / 'DBGHELP.dll', is_dir=False)
       else:
          if settings.mods.openkh is None:
             symlinks.make(game.folder / 'DBGHELP.dll', luabackend.folder / 'DBGHELP.dll', is_dir=False)
          else:
-            symlinks.make(game.folder / 'LuaBackend.dll', luabackend.folder / 'DBGHELP.dll', is_dir=False)
+            symlinks.make(folder / 'LuaBackend.dll', luabackend.folder / 'DBGHELP.dll', is_dir=False)
 
 def check_randomizer(randomizer: Randomizer, settings: Settings, settings_path: pathlib.Path):
    print('Checking randomizer')

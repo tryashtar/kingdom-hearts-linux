@@ -17,6 +17,7 @@ class KhGame:
    wineprefix: typing.Optional[pathlib.Path]
    saves: typing.Optional[pathlib.Path]
    folder: pathlib.Path
+   workspace: typing.Optional[pathlib.Path]
    @classmethod
    @abc.abstractmethod
    def saves_folder(cls) -> str: pass
@@ -25,6 +26,11 @@ class KhGame:
    def umu_id(cls) -> str: pass
    @abc.abstractmethod
    def get_exes(self) -> list[LaunchExe]: pass
+   
+   def get_workspace(self):
+      if self.workspace is not None:
+         return self.workspace
+      return self.folder
 
 @dataclasses.dataclass
 class Kh1525(KhGame):
@@ -134,11 +140,16 @@ class Randomizer:
    update: bool | datetime.datetime
 
 @dataclasses.dataclass
+class Kh3Mods:
+   folder: pathlib.Path
+
+@dataclasses.dataclass
 class Mods:
    openkh: typing.Optional[OpenKh]
    luabackend: typing.Optional[Luabackend]
    refined: typing.Optional[Refined]
    randomizer: typing.Optional[Randomizer]
+   kh3: typing.Optional[Kh3Mods]
 
 @dataclasses.dataclass
 class Settings:
