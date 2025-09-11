@@ -121,6 +121,7 @@ class OpenKh:
 class Luabackend:
    folder: pathlib.Path
    settings: pathlib.Path
+   scripts: typing.Optional[pathlib.Path]
    update: bool | datetime.datetime
 
 @dataclasses.dataclass
@@ -148,12 +149,13 @@ class Settings:
    mods: Mods
    
 def save_settings(settings: Settings, path: pathlib.Path):
-   with open(path, 'wb', encoding='utf-8') as data_file:
+   with open(path, 'w', encoding='utf-8') as data_file:
       data = mashumaro.codecs.yaml.encode(settings, Settings)
+      assert isinstance(data, str)
       data_file.write(data)
 
 def get_settings(path: pathlib.Path) -> Settings:
-   with open(path, 'rb', encoding='utf-8') as data_file:
+   with open(path, 'r', encoding='utf-8') as data_file:
       data = data_file.read()
       settings = mashumaro.codecs.yaml.decode(data, Settings)
       return settings

@@ -61,7 +61,7 @@ def set_data(data, key: str, value: typing.Any) -> bool:
    current = data.get(key)
    data[key] = value
    if value != current:
-      print(f'Changing {key} from {value} to {current}')
+      print(f'Changing {key} from {current} to {value}')
    return value != current
 
 def backup_folder(source: pathlib.Path, backup: pathlib.Path):
@@ -185,6 +185,8 @@ def get_environment(settings: Settings) -> Environment:
       print('Linux detected')
       environment = LinuxEnvironment()
       for game in settings.games.get_all():
+         assert game.wineprefix is not None
+         game.wineprefix.mkdir(parents=True, exist_ok=True)
          user_folder = environment.user_folder(game)
          if not user_folder.exists():
             print('Creating wineprefix')
@@ -214,15 +216,15 @@ def get_environment(settings: Settings) -> Environment:
                check=True,
                env=environment.wine_env(game)
             )
-      if settings.games.kh3 is not None:
-         assert settings.games.kh3.wineprefix is not None
-         winetricks = get_winetricks(settings.games.kh3.wineprefix)
+      if (game := settings.games.kh3) is not None:
+         assert game.wineprefix is not None
+         winetricks = get_winetricks(game.wineprefix)
          if 'wmp11' not in winetricks:
             print('Installing wmp11 to wineprefix')
             subprocess.run(
                ['winetricks', '-q', 'wmp11'],
                check=True,
-               env=environment.wine_env(settings.games.kh3)
+               env=environment.wine_env(game)
             )
       return environment
    else:
@@ -315,6 +317,11 @@ def check_openkh(openkh: OpenKh, symlinks: Symlinks, environment: Environment, s
             save_settings(settings, settings_path)
 
    print('Checking mod manager configuration')
+   use_game = settings.games.kh15_25
+   if use_game is None:
+      use_game = settings.games.kh28
+   if use_game is None:
+      raise ValueError('No game to get wineprefix from')
    symlinks.remove(default_manager_settings)
    if openkh.settings is not None:
       symlinks.make(default_manager_settings, openkh.settings, is_dir=True)
@@ -347,17 +354,19 @@ def check_openkh(openkh: OpenKh, symlinks: Symlinks, environment: Environment, s
          mgr_data = {
             'wizardVersionNumber': 1,
             'gameEdition': 2,
-            'gameModPath': openkh.folder / 'mod',
-            'gameDataPath': openkh.folder / 'data'
+            'gameModPath': str(environment.convert_path(use_game, openkh.folder / 'mod')),
+            'gameDataPath': str(environment.convert_path(use_game, openkh.folder / 'data')),
          }
          yaml.dump(mgr_data, mods_file)
    with open(manager_settings, 'r', encoding='utf-8') as mods_file:
       mgr_data = yaml.load(mods_file, yaml.CLoader)
    changed = False
    if openkh.mods is not None:
-      changed |= set_data(mgr_data, 'modCollectionPath', str(environment.convert_path(openkh.mods)))
-      changed |= set_data(mgr_data, 'modCollectionsPath', str(environment.convert_path(openkh.mods / 'collections')))
-      changed |= set_data(mgr_data, 'gameModPath', str(environment.convert_path(openkh.mods / 'output')))
+      # until https://github.com/OpenKH/OpenKh/issues/1202 is fixed, we may need to use symlinks instead
+      # still, users that manually customize it will get broken behavior both here and in openkh
+      changed |= set_data(mgr_data, 'modCollectionPath', str(environment.convert_path(use_game, openkh.mods)))
+      changed |= set_data(mgr_data, 'modCollectionsPath', str(environment.convert_path(use_game, openkh.mods / 'collections')))
+      changed |= set_data(mgr_data, 'gameModPath', str(environment.convert_path(use_game, openkh.mods / 'output')))
    changed |= set_data(mgr_data, 'panaceaInstalled', openkh.panacea is not None)
    changed |= set_data(mgr_data, 'pcVersion', {'steam': 'Steam', 'epic': 'EGS'}[settings.store])
    if (game := settings.games.kh15_25) is not None:
@@ -379,13 +388,13 @@ def check_openkh(openkh: OpenKh, symlinks: Symlinks, environment: Environment, s
          print('Creating default panacea settings')
          with open(openkh.panacea.settings, 'w', encoding='utf-8') as mods_file:
             mods_file.writelines([
-               'show_console=False\n'
+               'show_console=False\n',
             ])
       with open(openkh.panacea.settings, 'r', encoding='utf-8') as mods_file:
          pana_data = dict(line.rstrip('\n').split('=', 1) for line in mods_file.readlines())
       changed = False
       path = pathlib.Path(mgr_data['gameModPath'])
-      changed |= set_data(pana_data, 'mod_path', str(environment.convert_path(path)))
+      changed |= set_data(pana_data, 'mod_path', str(environment.convert_path(use_game, path)))
       if changed:
          with open(openkh.panacea.settings, 'w', encoding='utf-8') as mods_file:
             mods_file.writelines([f'{key}={value}\n' for key, value in pana_data.items()])
@@ -474,35 +483,43 @@ def check_luabackend(luabackend: Luabackend, openkh_settings: dict[str, typing.A
    with open(luabackend.settings, 'r', encoding='utf-8') as mods_file:
       data = tomlkit.load(mods_file)
    changed = False
+   def add_scripts(key: str, game: KhGame, version: str, path: pathlib.Path):
+      script_path = environment.convert_path(game, path)
+      for entry in data[version]['scripts']:
+         if entry.get(key) == True:
+            return set_data(entry, 'path', str(script_path))
+      data[version]['scripts'].append({'path': str(script_path), 'relative': False, key: True})
+      print(f'Added {key} script entry {path}')
+      return True
    def add_openkh(game: KhGame, version: str) -> bool:
       if openkh_settings is None:
          return False
       game_folder = pathlib.Path(openkh_settings['gameModPath'])
-      script_path = environment.convert_path(game, game_folder / version / 'scripts')
-      for entry in data[version]['scripts']:
-         if entry.get('openkh') == True:
-            return set_data(entry, 'path', str(script_path))
-      data[version]['scripts'].append({'path': script_path, 'relative': False, 'openkh': True})
-      print(f'Added openkh script entry {script_path}')
+      script_path = game_folder / version / 'scripts'
+      add_scripts('openkh', game, version, script_path)
       return True
    if (game := settings.games.kh15_25) is not None:
-      changed |= set_data(data['kh1'], 'exe', str(environment.convert_path(game, game.kh1.exe)))
-      changed |= set_data(data['kh2'], 'exe', str(environment.convert_path(game, game.kh2.exe)))
-      changed |= set_data(data['bbs'], 'exe', str(environment.convert_path(game, game.khbbs.exe)))
-      changed |= set_data(data['recom'], 'exe', str(environment.convert_path(game, game.khrecom.exe)))
-      path = pathlib.Path(game.saves_folder())
+      changed |= set_data(data['kh1'], 'exe', str(game.kh1.exe.relative_to(game.folder)))
+      changed |= set_data(data['kh2'], 'exe', str(game.kh2.exe.relative_to(game.folder)))
+      changed |= set_data(data['bbs'], 'exe', str(game.khbbs.exe.relative_to(game.folder)))
+      changed |= set_data(data['recom'], 'exe', str(game.khrecom.exe.relative_to(game.folder)))
+      path = pathlib.PurePath(game.saves_folder())
       if settings.store == 'steam':
          path = 'My Games' / path
       for version in ['kh1', 'kh2', 'bbs', 'recom']:
-         changed |= set_data(data[version], 'game_docs', str(environment.convert_path(game, path)))
+         changed |= set_data(data[version], 'game_docs', str(path))
          changed |= add_openkh(game, version)
+         if luabackend.scripts is not None:
+            changed |= add_scripts('lua', game, version, luabackend.scripts / version)
    if (game := settings.games.kh28) is not None:
-      changed |= set_data(data['kh3d'], 'exe', str(environment.convert_path(game, game.khddd.exe)))
-      path = pathlib.Path(game.saves_folder())
+      changed |= set_data(data['kh3d'], 'exe', str(game.khddd.exe.relative_to(game.folder)))
+      path = pathlib.PurePath(game.saves_folder())
       if settings.store == 'steam':
          path = 'My Games' / path
-      changed |= set_data(data['kh3d'], 'game_docs', str(environment.convert_path(game, path)))
+      changed |= set_data(data['kh3d'], 'game_docs', str(path))
       changed |= add_openkh(game, 'kh3d')
+      if luabackend.scripts is not None:
+            changed |= add_scripts('lua', game, 'kh3d', luabackend.scripts / 'kh3d')
    if changed:
       with open(luabackend.settings, 'w', encoding='utf-8') as mods_file:
          tomlkit.dump(data, mods_file)
