@@ -7,6 +7,7 @@ import os
 import subprocess
 import datetime
 import tomlkit
+import tomlkit.items
 import yaml
 import tempfile
 import stat
@@ -65,7 +66,7 @@ def main():
    
    symlinks.commit()
 
-def set_data(data, key: str, value: typing.Any) -> bool:
+def set_data(data: dict[str, str] | tomlkit.items.AbstractTable, key: str, value: typing.Any) -> bool:
    current = data.get(key)
    data[key] = value
    if value != current:
@@ -495,10 +496,14 @@ def check_luabackend(luabackend: Luabackend, openkh_settings: dict[str, typing.A
    changed = False
    def add_scripts(key: str, game: KhGame, version: str, path: pathlib.Path):
       script_path = environment.convert_path(game, path)
-      for entry in data[version]['scripts']:
+      block = data[version]
+      assert isinstance(block, tomlkit.items.AbstractTable)
+      script_section = block['scripts']
+      assert isinstance(script_section, tomlkit.items.AoT)
+      for entry in script_section:
          if entry.get('key') == key:
             return set_data(entry, 'path', str(script_path))
-      data[version]['scripts'].append({'path': str(script_path), 'relative': False, 'key': key})
+      script_section.append({'path': str(script_path), 'relative': False, 'key': key})
       print(f'Added {key} script entry {path}')
       return True
    def add_openkh(game: KhGame, version: str) -> bool:
@@ -509,24 +514,24 @@ def check_luabackend(luabackend: Luabackend, openkh_settings: dict[str, typing.A
       add_scripts('openkh', game, version, script_path)
       return True
    if (game := settings.games.kh15_25) is not None:
-      changed |= set_data(data['kh1'], 'exe', str(game.kh1.exe()))
-      changed |= set_data(data['kh2'], 'exe', str(game.kh2.exe()))
-      changed |= set_data(data['bbs'], 'exe', str(game.khbbs.exe()))
-      changed |= set_data(data['recom'], 'exe', str(game.khrecom.exe()))
+      changed |= set_data(typing.cast(tomlkit.items.AbstractTable, data['kh1']), 'exe', str(game.kh1.exe()))
+      changed |= set_data(typing.cast(tomlkit.items.AbstractTable, data['kh2']), 'exe', str(game.kh2.exe()))
+      changed |= set_data(typing.cast(tomlkit.items.AbstractTable, data['bbs']), 'exe', str(game.khbbs.exe()))
+      changed |= set_data(typing.cast(tomlkit.items.AbstractTable, data['recom']), 'exe', str(game.khrecom.exe()))
       path = game.saves_folder()
       if settings.store == 'steam':
          path = 'My Games' / path
       for version in ['kh1', 'kh2', 'bbs', 'recom']:
-         changed |= set_data(data[version], 'game_docs', str(path))
+         changed |= set_data(typing.cast(tomlkit.items.AbstractTable, data[version]), 'game_docs', str(path))
          changed |= add_openkh(game, version)
          if luabackend.scripts is not None:
             changed |= add_scripts('lua', game, version, luabackend.scripts / version)
    if (game := settings.games.kh28) is not None:
-      changed |= set_data(data['kh3d'], 'exe', str(game.khddd.exe()))
+      changed |= set_data(typing.cast(tomlkit.items.AbstractTable, data['kh3d']), 'exe', str(game.khddd.exe()))
       path = game.saves_folder()
       if settings.store == 'steam':
          path = 'My Games' / path
-      changed |= set_data(data['kh3d'], 'game_docs', str(path))
+      changed |= set_data(typing.cast(tomlkit.items.AbstractTable, data['kh3d']), 'game_docs', str(path))
       changed |= add_openkh(game, 'kh3d')
       if luabackend.scripts is not None:
             changed |= add_scripts('lua', game, 'kh3d', luabackend.scripts / 'kh3d')
