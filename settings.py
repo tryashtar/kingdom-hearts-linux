@@ -9,8 +9,58 @@ StoreKind = typing.Literal['epic', 'steam']
 
 @dataclasses.dataclass
 class LaunchExe:
-   exe: pathlib.Path
    launch: typing.Optional[pathlib.Path]
+   @classmethod
+   @abc.abstractmethod
+   def exe(cls) -> pathlib.PurePath: pass
+
+@dataclasses.dataclass
+class LaunchKh1(LaunchExe):
+   @classmethod
+   def exe(cls) -> pathlib.PurePath:
+      return pathlib.PurePath('KINGDOM HEARTS FINAL MIX.exe')
+
+@dataclasses.dataclass
+class LaunchKh2(LaunchExe):
+   @classmethod
+   def exe(cls) -> pathlib.PurePath:
+      return pathlib.PurePath('KINGDOM HEARTS II FINAL MIX.exe')
+
+@dataclasses.dataclass
+class LaunchKhBbs(LaunchExe):
+   @classmethod
+   def exe(cls) -> pathlib.PurePath:
+      return pathlib.PurePath('KINGDOM HEARTS Birth by Sleep FINAL MIX.exe')
+
+@dataclasses.dataclass
+class LaunchKhRecom(LaunchExe):
+   @classmethod
+   def exe(cls) -> pathlib.PurePath:
+      return pathlib.PurePath('KINGDOM HEARTS Re_Chain of Memories.exe')
+
+@dataclasses.dataclass
+class LaunchKhDdd(LaunchExe):
+   @classmethod
+   def exe(cls) -> pathlib.PurePath:
+      return pathlib.PurePath('KINGDOM HEARTS Dream Drop Distance.exe')
+
+@dataclasses.dataclass
+class LaunchKh02(LaunchExe):
+   @classmethod
+   def exe(cls) -> pathlib.PurePath:
+      return pathlib.PurePath('KINGDOM HEARTS 0.2 Birth by Sleep/Binaries/Win64/KINGDOM HEARTS 0.2 Birth by Sleep.exe')
+
+@dataclasses.dataclass
+class LaunchKh3(LaunchExe):
+   @classmethod
+   def exe(cls) -> pathlib.PurePath:
+      return pathlib.PurePath('KINGDOM HEARTS III/Binaries/Win64/KINGDOM HEARTS III.exe')
+
+@dataclasses.dataclass
+class LaunchKhMom(LaunchExe):
+   @classmethod
+   def exe(cls) -> pathlib.PurePath:
+      return pathlib.PurePath('KINGDOM HEARTS Melody of Memory.exe')
 
 @dataclasses.dataclass
 class KhGame:
@@ -20,7 +70,7 @@ class KhGame:
    workspace: typing.Optional[pathlib.Path]
    @classmethod
    @abc.abstractmethod
-   def saves_folder(cls) -> str: pass
+   def saves_folder(cls) -> pathlib.PurePath: pass
    @classmethod
    @abc.abstractmethod
    def umu_id(cls) -> str: pass
@@ -34,14 +84,14 @@ class KhGame:
 
 @dataclasses.dataclass
 class Kh1525(KhGame):
-   kh1: LaunchExe
-   kh2: LaunchExe
-   khrecom: LaunchExe
-   khbbs: LaunchExe
+   kh1: LaunchKh1
+   kh2: LaunchKh2
+   khrecom: LaunchKhRecom
+   khbbs: LaunchKhBbs
    
    @classmethod
-   def saves_folder(cls) -> str:
-      return 'KINGDOM HEARTS HD 1.5+2.5 ReMIX'
+   def saves_folder(cls) -> pathlib.PurePath:
+      return pathlib.PurePath('KINGDOM HEARTS HD 1.5+2.5 ReMIX')
 
    @classmethod
    def umu_id(cls) -> str:
@@ -52,12 +102,12 @@ class Kh1525(KhGame):
 
 @dataclasses.dataclass
 class Kh28(KhGame):
-   khddd: LaunchExe
-   kh02: LaunchExe
+   khddd: LaunchKhDdd
+   kh02: LaunchKh02
    
    @classmethod
-   def saves_folder(cls) -> str:
-      return 'KINGDOM HEARTS HD 2.8 Final Chapter Prologue'
+   def saves_folder(cls) -> pathlib.PurePath:
+      return pathlib.PurePath('KINGDOM HEARTS HD 2.8 Final Chapter Prologue')
    
    @classmethod
    def umu_id(cls) -> str:
@@ -68,11 +118,11 @@ class Kh28(KhGame):
 
 @dataclasses.dataclass
 class Kh3(KhGame):
-   kh3: LaunchExe
+   kh3: LaunchKh3
    
    @classmethod
-   def saves_folder(cls) -> str:
-      return 'KINGDOM HEARTS III'
+   def saves_folder(cls) -> pathlib.PurePath:
+      return pathlib.PurePath('KINGDOM HEARTS III')
    
    @classmethod
    def umu_id(cls) -> str:
@@ -83,11 +133,11 @@ class Kh3(KhGame):
 
 @dataclasses.dataclass
 class KhMom(KhGame):
-   khmom: LaunchExe
+   khmom: LaunchKhMom
    
    @classmethod
-   def saves_folder(cls) -> str:
-      return 'KINGDOM HEARTS Melody of Memory'
+   def saves_folder(cls) -> pathlib.PurePath:
+      return pathlib.PurePath('KINGDOM HEARTS Melody of Memory')
    
    @classmethod
    def umu_id(cls) -> str:

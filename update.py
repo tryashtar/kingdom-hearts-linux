@@ -30,7 +30,7 @@ def main():
       symlinks.remove(folder / 'reFined.cfg')
       if (refined := settings.mods.refined) is not None:
          symlinks.make(folder / 'reFined.cfg', refined.settings, is_dir=False)
-   
+
    for game in settings.games.get_classic():
       folder = game.get_workspace()
       symlinks.remove(game.folder / 'version.dll')
@@ -118,7 +118,7 @@ class WindowsEnvironment(Environment):
       with open(exe.launch, 'w', encoding='utf-8') as sh_file:
          sh_file.writelines([
             f'cd /d "{folder}" || exit 1\n',
-            f'{exe.exe}\n'
+            f'{game.folder / exe.exe()}\n'
          ])
       filestat = exe.launch.stat()
       exe.launch.chmod(filestat.st_mode | stat.S_IEXEC)
@@ -154,7 +154,7 @@ class LinuxEnvironment(Environment):
          check=True,
          env=self.wine_env(game)
       )
-      
+   
    def make_launch(self, game: KhGame, exe: LaunchExe, settings: Settings):
       if exe.launch is None:
          return
@@ -180,11 +180,11 @@ class LinuxEnvironment(Environment):
          sh_file.writelines([
             '#!/bin/sh\n',
             f'cd "{folder}" || exit 1\n',
-            f'{env} exec wine "{exe.exe}"\n'
+            f'{env} exec wine "{game.folder / exe.exe()}"\n'
          ])
       filestat = exe.launch.stat()
       exe.launch.chmod(filestat.st_mode | stat.S_IEXEC)
-      
+   
    @classmethod
    def is_linux(cls) -> bool:
       return True
@@ -255,7 +255,7 @@ class Symlinks:
    
    def remove(self, path: pathlib.Path):
       self.remove_symlinks.add(path)
-      
+   
    def make(self, new: pathlib.Path, existing: pathlib.Path, is_dir: bool):
       if new in self.remove_symlinks:
          self.remove_symlinks.remove(new)
@@ -509,11 +509,11 @@ def check_luabackend(luabackend: Luabackend, openkh_settings: dict[str, typing.A
       add_scripts('openkh', game, version, script_path)
       return True
    if (game := settings.games.kh15_25) is not None:
-      changed |= set_data(data['kh1'], 'exe', str(game.kh1.exe.relative_to(game.folder)))
-      changed |= set_data(data['kh2'], 'exe', str(game.kh2.exe.relative_to(game.folder)))
-      changed |= set_data(data['bbs'], 'exe', str(game.khbbs.exe.relative_to(game.folder)))
-      changed |= set_data(data['recom'], 'exe', str(game.khrecom.exe.relative_to(game.folder)))
-      path = pathlib.PurePath(game.saves_folder())
+      changed |= set_data(data['kh1'], 'exe', str(game.kh1.exe()))
+      changed |= set_data(data['kh2'], 'exe', str(game.kh2.exe()))
+      changed |= set_data(data['bbs'], 'exe', str(game.khbbs.exe()))
+      changed |= set_data(data['recom'], 'exe', str(game.khrecom.exe()))
+      path = game.saves_folder()
       if settings.store == 'steam':
          path = 'My Games' / path
       for version in ['kh1', 'kh2', 'bbs', 'recom']:
@@ -522,8 +522,8 @@ def check_luabackend(luabackend: Luabackend, openkh_settings: dict[str, typing.A
          if luabackend.scripts is not None:
             changed |= add_scripts('lua', game, version, luabackend.scripts / version)
    if (game := settings.games.kh28) is not None:
-      changed |= set_data(data['kh3d'], 'exe', str(game.khddd.exe.relative_to(game.folder)))
-      path = pathlib.PurePath(game.saves_folder())
+      changed |= set_data(data['kh3d'], 'exe', str(game.khddd.exe()))
+      path = game.saves_folder()
       if settings.store == 'steam':
          path = 'My Games' / path
       changed |= set_data(data['kh3d'], 'game_docs', str(path))
