@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "mashumaro>=3.16",
+    "pylnk3>=0.4.3",
     "pyunpack>=0.3",
     "pyyaml>=6.0.2",
     "requests>=2.32.5",
