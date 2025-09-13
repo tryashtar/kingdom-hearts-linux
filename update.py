@@ -1,4 +1,5 @@
 import abc
+import ntpath
 import typing
 import requests
 import json
@@ -162,31 +163,39 @@ class LinuxEnvironment(Environment):
       if exe.launch is None:
          return
       assert game.wineprefix is not None
-      folder = game.get_workspace()
-      folder.mkdir(parents=True, exist_ok=True)
-      shortcut = folder / exe.exe().with_suffix('.lnk').name
-      pylnk3.for_file(str(self.convert_path(game, game.folder / exe.exe())), str(shortcut))
-      exe.launch.parent.mkdir(parents=True, exist_ok=True)
       env_vars: dict[str, str] = {
          'WINEPREFIX': str(game.wineprefix),
          'PROTONPATH': 'GE-Proton',
          'WINEFSYNC': '1',
          'WINE_FULLSCREEN_FSR': '1',
-         'WINEDEBUG': '-all'
+         'WINEDEBUG': '-all',
       }
       dlls: dict[str, str] = {
          'version': 'n,b',
-         'dinput8': 'n,b'
+         'dinput8': 'n,b',
       }
       env_vars['WINEDLLOVERRIDES'] = ';'.join(f'{key}={value}' for key, value in dlls.items())
       env_vars['GAMEID'] = game.umu_id()
       env_vars['STORE'] = {'steam': 'steam', 'epic': 'egs'}[settings.store]
+      if game.workspace is not None:
+         game.workspace.mkdir(parents=True, exist_ok=True)
+         shortcut_name = exe.exe().with_suffix('.lnk').name
+         shortcut = game.workspace / shortcut_name
+         link = make_shortcut(self.convert_path(game, game.folder / exe.exe()), is_dir=False)
+         with open(shortcut, 'wb') as link_file:
+            link.write(link_file)
+         cd = game.workspace
+         cmd = f'start /unix {shlex.quote(str(shortcut_name))}'
+      else:
+         cd = game.folder
+         cmd = shlex.quote(str(exe.exe()))
+      exe.launch.parent.mkdir(parents=True, exist_ok=True)
       with open(exe.launch, 'w', encoding='utf-8') as sh_file:
          env = ' '.join(f'{key}={shlex.quote(value)}' for key, value in env_vars.items())
          sh_file.writelines([
             '#!/bin/sh\n',
-            f'cd {shlex.quote(str(folder))} || exit 1\n',
-            f'{env} exec umu-run start {shlex.quote(str(shortcut))}\n'
+            f'cd {shlex.quote(str(cd))} || exit 1\n',
+            f'{env} exec umu-run {cmd}\n'
          ])
       filestat = exe.launch.stat()
       exe.launch.chmod(filestat.st_mode | stat.S_IEXEC)
@@ -194,6 +203,27 @@ class LinuxEnvironment(Environment):
    @classmethod
    def is_linux(cls) -> bool:
       return True
+
+def make_shortcut(target: pathlib.Path, is_dir: bool) -> pylnk3.Lnk:
+   link = pylnk3.Lnk()
+   link.link_flags.IsUnicode = True
+   levels = list(pylnk3.path_levels(str(target)))
+   elements = [pylnk3.RootEntry(pylnk3.ROOT_MY_COMPUTER), pylnk3.DriveEntry(levels[0])]
+   for level in levels[1:]:
+      segment = pylnk3.PathSegmentEntry()
+      segment.type = pylnk3.TYPE_FOLDER
+      segment.short_name = ntpath.split(level)[1]
+      segment.full_name = segment.short_name
+      segment.file_size = 0
+      date = datetime.datetime(1980, 1, 1)
+      segment.created = date
+      segment.modified = date
+      segment.accessed = date
+      elements.append(segment)
+   elements[-1].type = pylnk3.TYPE_FOLDER if is_dir else pylnk3.TYPE_FOLDER
+   link.shell_item_id_list = pylnk3.LinkTargetIDList()
+   link.shell_item_id_list.items = elements
+   return link
 
 def get_environment(settings: Settings) -> Environment:
    is_linux = platform.system() == 'Linux'
@@ -215,16 +245,16 @@ def get_environment(settings: Settings) -> Environment:
          if docs_folder.is_symlink():
             print('Unlinking new documents folder')
             docs_folder.unlink()
-      if (game := settings.games.kh3) is not None:
-         assert game.wineprefix is not None
-         winetricks = get_winetricks(game.wineprefix)
-         if 'wmp11' not in winetricks:
-            print('Installing wmp11 to wineprefix')
-            subprocess.run(
-               ['umu-run', 'winetricks', 'wmp11'],
-               check=True,
-               env=environment.wine_env(game)
-            )
+      #if (game := settings.games.kh3) is not None:
+      #   assert game.wineprefix is not None
+      #   winetricks = get_winetricks(game.wineprefix)
+      #   if 'wmp11' not in winetricks:
+      #      print('Installing wmp11 to wineprefix')
+      #      subprocess.run(
+      #         ['umu-run', 'winetricks', 'wmp11'],
+      #         check=True,
+      #         env=environment.wine_env(game)
+      #      )
       return environment
    else:
       print('Windows detected')
