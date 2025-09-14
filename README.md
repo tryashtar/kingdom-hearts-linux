@@ -4,7 +4,7 @@ This Python script sets up and maintains an environment for playing the PC ports
 
 Optional popular community tools and mods can also be downloaded, updated, and integrated.
 
-All changes are isolated from your base game install files and are fully reversible.
+All changes are isolated from your base game install files and are fully reversible. Your configuration is declarative, and the script will update your environment to match your configuration each time it is run.
 
 Windows is also supported. Although the games run natively on Windows, this script can be helpful for automating installation, updating, and building of mods on all platforms. All the Linux-specific operations will be skipped.
 
@@ -14,15 +14,14 @@ Windows is also supported. Although the games run natively on Windows, this scri
 
 First, you'll need to make sure you have all of these installed:
 
-* **`python3`**: Required for the script itself. It also needs these `pip` packages: `requests`, `tomlkit`, `pyyaml`.
-* **`wine`**: Required for running Windows programs such as the Kingdom Hearts games on Linux. It also needs `winetricks` for setup.
+* **`uv`**: Required to run the script itself.
+* **`wine`**: Required for running Windows programs such as the Kingdom Hearts games on Linux. `winetricks` and `wine-mono` are also required for these games.
 * **`git`**: Used to download and update mod patches.
 
 On Arch, this command should install all of them:
 
 ```sh
-sudo pacman -S python python-requests python-tomlkit python-yaml wine winetricks git
-sudo winetricks --self-update
+sudo pacman -S uv wine winetricks wine-mono git
 ```
 
 **2. Clone and First Run**
@@ -36,10 +35,10 @@ git clone https://github.com/tryashtar/kingdom-hearts-linux
 And run it:
 
 ```sh
-python3 update.py
+uv run update.py
 ```
 
-First, it will ask you to input the folders where your games are installed. If you haven't installed them yet, you can run the installers through Wine. They don't need to go in your wineprefix, you can put them anywhere.
+First, it will ask you to input the folders where your games are installed. If you haven't installed them yet, you can run the installers through Wine. They don't need to go in your wineprefix; you can put them anywhere.
 
 It will then ask a few more questions, and allow you to add optional features like mods.
 
@@ -59,20 +58,12 @@ All features are downloaded into their own folders, and *symlinked* into the gam
 
 **Required to Run on Linux**
 
-A [special build of Wine](https://github.com/GloriousEggroll/wine-ge-custom) is downloaded, updated, and used to run the game.
-
-A dedicated wineprefix is also created. The necessary dependencies `dxvk` and `vkd3d` are installed.
-
-The `EPIC` folder is renamed to `EPIC.bak` to prevent crashes when playing unsupported prerendered cutscenes.
+Dedicated wineprefixs are created. The necessary dependencies are installed.
 
 **Optional Additions**
 
 [OpenKh Mod Manager](https://openkh.dev/tool/GUI.ModsManager): Will be downloaded and updated. Its `mods` folder will be symlinked out for convenience, and all git-based mods inside will be updated and built. If Panacea is selected, the necessary DLLs will be symlinked into the install folders.
 
 [LuaBackend](https://github.com/Sirius902/LuaBackend): Will be downloaded and updated. The DLLs will be symlinked into the install folders. The configuration will be updated to include loading scripts from OpenKH mod folders.
-
-[KH ReFined](https://github.com/KH-ReFined/KH-ReFined): Will be downloaded and updated. `dotnet` will be installed in the wineprefix to allow launching it. Its executable and DLLs will be symlinked into the install folders. The vanilla executable will be preserved, and restored if ReFined is ever removed. Its required patch will be installed and updated. Optional addons are also available.
-
-[KH2 Randomizer](https://tommadness.github.io/KH2Randomizer): Will be downloaded and updated. Its required patch will be installed and updated.
 
 For convenience and by default, a `Save Data` folder is created to hold your game saves. The paths in the wineprefix's `Documents` folder are symlinked to it. Additionally, small scripts to launch each game are created in a `launch` folder. The locations of these can be customized or disabled altogether.
