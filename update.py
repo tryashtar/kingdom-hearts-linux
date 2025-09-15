@@ -235,7 +235,7 @@ def make_launch(game: KhGame, launch: LaunchExe, environment: Environment, setti
    env = make_env(game, environment, settings, lua=lua, openkh=openkh, refined=refined)
    launch.launch.parent.mkdir(parents=True, exist_ok=True)
    with open(launch.launch, 'w', encoding='utf-8') as sh_file:
-      environment.make_launch(sh_file, game.get_workspace(), game.folder / launch.exe(), env)
+      environment.make_launch(sh_file, environment.convert_path(game, game.get_workspace()), environment.convert_path(game, game.folder / launch.exe()), env)
    filestat = launch.launch.stat()
    launch.launch.chmod(filestat.st_mode | stat.S_IEXEC)
 
