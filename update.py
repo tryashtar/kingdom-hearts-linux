@@ -63,21 +63,21 @@ def main():
       check_randomizer(randomizer, settings, settings_path)
    
    if (game := settings.games.kh15_25) is not None:
-      make_launch(game, game.kh1, environment, settings, lua=True, openkh=True, refined=False)
-      make_launch(game, game.kh2, environment, settings, lua=True, openkh=True, refined=True)
-      make_launch(game, game.khbbs, environment, settings, lua=True, openkh=True, refined=False)
-      make_launch(game, game.khrecom, environment, settings, lua=True, openkh=True, refined=False)
+      make_launch(game, game.kh1, environment, settings, lua=True, openkh=True, refined=False, kh3=False)
+      make_launch(game, game.kh2, environment, settings, lua=True, openkh=True, refined=True, kh3=False)
+      make_launch(game, game.khbbs, environment, settings, lua=True, openkh=True, refined=False, kh3=False)
+      make_launch(game, game.khrecom, environment, settings, lua=True, openkh=True, refined=False, kh3=False)
    if (game := settings.games.kh28) is not None:
-      make_launch(game, game.khddd, environment, settings, lua=True, openkh=True, refined=False)
-      make_launch(game, game.kh02, environment, settings, lua=False, openkh=False, refined=False)
+      make_launch(game, game.khddd, environment, settings, lua=True, openkh=True, refined=False, kh3=False)
+      make_launch(game, game.kh02, environment, settings, lua=False, openkh=False, refined=False, kh3=False)
    if (game := settings.games.kh3) is not None:
-      make_launch(game, game.kh3, environment, settings, lua=False, openkh=False, refined=False)
+      make_launch(game, game.kh3, environment, settings, lua=False, openkh=False, refined=False, kh3=True)
    if (game := settings.games.khmom) is not None:
-      make_launch(game, game.khmom, environment, settings, lua=False, openkh=False, refined=False)
+      make_launch(game, game.khmom, environment, settings, lua=False, openkh=False, refined=False, kh3=False)
       
    symlinks.commit()
 
-def get_access_folders(game: KhGame, settings: Settings, lua: bool, openkh: bool, refined: bool) -> tuple[list[pathlib.Path], list[pathlib.Path]]:
+def get_access_folders(game: KhGame, settings: Settings, lua: bool, openkh: bool, refined: bool, kh3: bool) -> tuple[list[pathlib.Path], list[pathlib.Path]]:
    readable: list[pathlib.Path] = [game.folder]
    if game.workspace is not None:
       readable.append(game.workspace)
@@ -94,6 +94,8 @@ def get_access_folders(game: KhGame, settings: Settings, lua: bool, openkh: bool
          readable.append(settings.mods.openkh.mods)
    if refined and settings.mods.refined is not None:
       readable.append(settings.mods.refined.settings)
+   if kh3 and settings.mods.kh3 is not None:
+      readable.append(settings.mods.kh3.folder)
    readable = list(dict.fromkeys(readable))
    writable: list[pathlib.Path] = []
    if game.saves is not None:
@@ -202,10 +204,9 @@ class LinuxEnvironment(Environment):
    def is_linux(cls) -> bool:
       return True
 
-def make_env(game: KhGame, environment: Environment, settings: Settings, lua: bool, openkh: bool, refined: bool) -> dict[str, str]:
+def make_env(game: KhGame, environment: Environment, settings: Settings, lua: bool, openkh: bool, refined: bool, kh3: bool) -> dict[str, str]:
    if not environment.is_linux():
       return {}
-   read, write = get_access_folders(game, settings, lua=lua, openkh=openkh, refined=refined)
    dlls: dict[str, str] = {}
    if openkh and settings.mods.openkh is not None and settings.mods.openkh.panacea is not None:
       dlls['version'] = 'n,b'
@@ -220,6 +221,7 @@ def make_env(game: KhGame, environment: Environment, settings: Settings, lua: bo
       'WINEDEBUG': '-all'
    }
    if isinstance(environment, LinuxEnvironment) and environment.runtime == 'umu':
+      read, write = get_access_folders(game, settings, lua=lua, openkh=openkh, refined=refined, kh3=kh3)
       env |= {
          'PROTONPATH': 'GE-Proton',
          'GAMEID': game.umu_id(),
@@ -229,10 +231,10 @@ def make_env(game: KhGame, environment: Environment, settings: Settings, lua: bo
       }
    return env
 
-def make_launch(game: KhGame, launch: LaunchExe, environment: Environment, settings: Settings, lua: bool, openkh: bool, refined: bool):
+def make_launch(game: KhGame, launch: LaunchExe, environment: Environment, settings: Settings, lua: bool, openkh: bool, refined: bool, kh3: bool):
    if launch.launch is None:
       return
-   env = make_env(game, environment, settings, lua=lua, openkh=openkh, refined=refined)
+   env = make_env(game, environment, settings, lua=lua, openkh=openkh, refined=refined, kh3=kh3)
    launch.launch.parent.mkdir(parents=True, exist_ok=True)
    with open(launch.launch, 'w', encoding='utf-8') as sh_file:
       environment.make_launch(sh_file, environment.convert_path(game, game.get_workspace()), environment.convert_path(game, game.folder / launch.exe()), env)

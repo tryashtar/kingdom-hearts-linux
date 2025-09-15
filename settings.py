@@ -5,8 +5,6 @@ import typing
 import pathlib
 import datetime
 
-StoreKind = typing.Literal['epic', 'steam']
-
 @dataclasses.dataclass
 class LaunchExe:
    launch: typing.Optional[pathlib.Path]
@@ -201,6 +199,7 @@ class Mods:
    randomizer: typing.Optional[Randomizer]
    kh3: typing.Optional[Kh3Mods]
 
+StoreKind = typing.Literal['epic', 'steam']
 WineRuntime = typing.Literal['wine', 'umu']
 
 @dataclasses.dataclass
