@@ -1,5 +1,4 @@
 import abc
-import shlex
 import typing
 import requests
 import json
@@ -15,6 +14,7 @@ import stat
 import platform
 import pyunpack
 import pathlib
+import shlex
 from settings import KhGame, LaunchExe, Luabackend, OpenKh, Randomizer, Settings, get_settings, save_settings
 
 def main():
@@ -136,11 +136,11 @@ class LinuxEnvironment(Environment):
    
    def wine_env(self, game: KhGame):
       assert game.wineprefix is not None
-      return dict(os.environ, WINEPREFIX=str(game.wineprefix))
+      return dict(os.environ, WINEPREFIX=str(game.wineprefix), PROTONPATH='GE-Proton')
    
    def convert_path(self, game: KhGame, path: pathlib.Path) -> pathlib.Path:
       result = subprocess.run(
-         ['winepath', '-w', str(path)],
+         ['umu-run', 'winepath', '-w', str(path)],
          check=True,
          stdout=subprocess.PIPE,
          stderr=subprocess.DEVNULL,
@@ -161,8 +161,17 @@ class LinuxEnvironment(Environment):
       if exe.launch is None:
          return
       assert game.wineprefix is not None
+      readable: list[pathlib.Path] = [game.folder]
+      if game.workspace is not None:
+         readable.append(game.workspace)
+      writable: list[pathlib.Path] = []
+      if game.saves is not None:
+         writable.append(game.saves)
       env_vars: dict[str, str] = {
          'WINEPREFIX': str(game.wineprefix),
+         'PROTONPATH': 'GE-Proton',
+         'PRESSURE_VESSEL_FILESYSTEMS_RO': ':'.join((str(x) for x in readable)),
+         'PRESSURE_VESSEL_FILESYSTEMS_RW': ':'.join((str(x) for x in writable)),
          'WINEFSYNC': '1',
          'WINE_FULLSCREEN_FSR': '1',
          'WINEDEBUG': '-all',
@@ -174,14 +183,12 @@ class LinuxEnvironment(Environment):
       env_vars['WINEDLLOVERRIDES'] = ';'.join(f'{key}={value}' for key, value in dlls.items())
       env_vars['GAMEID'] = game.umu_id()
       env_vars['STORE'] = {'steam': 'steam', 'epic': 'egs'}[settings.store]
-      folder = game.get_workspace()
       exe.launch.parent.mkdir(parents=True, exist_ok=True)
       with open(exe.launch, 'w', encoding='utf-8') as sh_file:
          env = ' '.join(f'{key}={shlex.quote(value)}' for key, value in env_vars.items())
          sh_file.writelines([
             '#!/bin/sh\n',
-            f'cd {shlex.quote(str(folder))} || exit 1\n',
-            f'{env} exec wine {shlex.quote(str(game.folder / exe.exe()))}\n'
+            f'{env} exec umu-run start /wait /b /d {shlex.quote(str(self.convert_path(game, game.get_workspace())))} {shlex.quote(str(self.convert_path(game, game.folder / exe.exe())))}\n',
          ])
       filestat = exe.launch.stat()
       exe.launch.chmod(filestat.st_mode | stat.S_IEXEC)
@@ -202,7 +209,7 @@ def get_environment(settings: Settings) -> Environment:
          if not user_folder.exists():
             print('Creating wineprefix')
             subprocess.run(
-               ['wineboot'],
+               ['umu-run', 'wineboot', '-k'],
                check=True,
                env=environment.wine_env(game)
             )
@@ -210,33 +217,6 @@ def get_environment(settings: Settings) -> Environment:
          if docs_folder.is_symlink():
             print('Unlinking new documents folder')
             docs_folder.unlink()
-      for game in settings.games.get_classic():
-         assert game.wineprefix is not None
-         winetricks = get_winetricks(game.wineprefix)
-         if 'vkd3d' not in winetricks:
-            print('Installing vkd3d to wineprefix')
-            subprocess.run(
-               ['winetricks', '-q', 'vkd3d'],
-               check=True,
-               env=environment.wine_env(game)
-            )
-         if 'dxvk' not in winetricks:
-            print('Installing dxvk to wineprefix')
-            subprocess.run(
-               ['winetricks', '-q', 'dxvk'],
-               check=True,
-               env=environment.wine_env(game)
-            )
-      if (game := settings.games.kh3) is not None:
-         assert game.wineprefix is not None
-         winetricks = get_winetricks(game.wineprefix)
-         if 'wmp11' not in winetricks:
-            print('Installing wmp11 to wineprefix')
-            subprocess.run(
-               ['winetricks', '-q', 'wmp11'],
-               check=True,
-               env=environment.wine_env(game)
-            )
       return environment
    else:
       print('Windows detected')
