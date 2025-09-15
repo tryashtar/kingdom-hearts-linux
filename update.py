@@ -54,12 +54,12 @@ def main():
       openkh_settings = check_openkh(openkh, symlinks, environment, settings, settings_path)
    else:
       openkh_settings = None
-
+   
    if (luabackend := settings.mods.luabackend) is not None:
       check_luabackend(luabackend, openkh_settings, symlinks, environment, settings, settings_path)
    
    if (randomizer := settings.mods.randomizer) is not None:
-      check_randomizer(randomizer, settings, settings_path) 
+      check_randomizer(randomizer, settings, settings_path)
    
    for game in settings.games.get_all():
       for exe in game.get_exes():
@@ -140,7 +140,7 @@ class LinuxEnvironment(Environment):
    
    def convert_path(self, game: KhGame, path: pathlib.Path) -> pathlib.Path:
       result = subprocess.run(
-         ['umu-run', 'winepath', '-w', str(path)],
+         ['winepath', '-w', str(path)],
          check=True,
          stdout=subprocess.PIPE,
          stderr=subprocess.DEVNULL,
@@ -164,9 +164,27 @@ class LinuxEnvironment(Environment):
       readable: list[pathlib.Path] = [game.folder]
       if game.workspace is not None:
          readable.append(game.workspace)
+      if settings.mods.luabackend is not None:
+         readable.append(settings.mods.luabackend.folder)
+         readable.append(settings.mods.luabackend.settings.parent)
+         if settings.mods.luabackend.scripts is not None:
+            readable.append(settings.mods.luabackend.scripts)
+      if settings.mods.openkh is not None:
+         readable.append(settings.mods.openkh.folder)
+         if settings.mods.openkh.panacea is not None:
+            readable.append(settings.mods.openkh.panacea.settings.parent)
+         if settings.mods.openkh.mods is not None:
+            readable.append(settings.mods.openkh.mods)
+      if settings.mods.refined is not None:
+         readable.append(settings.mods.refined.settings)
+      readable = list(dict.fromkeys(readable))
       writable: list[pathlib.Path] = []
       if game.saves is not None:
          writable.append(game.saves)
+      dlls: dict[str, str] = {
+         'version': 'n,b',
+         'dinput8': 'n,b',
+      }
       env_vars: dict[str, str] = {
          'WINEPREFIX': str(game.wineprefix),
          'PROTONPATH': 'GE-Proton',
@@ -175,14 +193,10 @@ class LinuxEnvironment(Environment):
          'WINEFSYNC': '1',
          'WINE_FULLSCREEN_FSR': '1',
          'WINEDEBUG': '-all',
+         'WINEDLLOVERRIDES': ';'.join(f'{key}={value}' for key, value in dlls.items()),
+         'GAMEID': game.umu_id(),
+         'STORE': {'steam': 'steam', 'epic': 'egs'}[settings.store],
       }
-      dlls: dict[str, str] = {
-         'version': 'n,b',
-         'dinput8': 'n,b',
-      }
-      env_vars['WINEDLLOVERRIDES'] = ';'.join(f'{key}={value}' for key, value in dlls.items())
-      env_vars['GAMEID'] = game.umu_id()
-      env_vars['STORE'] = {'steam': 'steam', 'epic': 'egs'}[settings.store]
       exe.launch.parent.mkdir(parents=True, exist_ok=True)
       with open(exe.launch, 'w', encoding='utf-8') as sh_file:
          env = ' '.join(f'{key}={shlex.quote(value)}' for key, value in env_vars.items())
@@ -561,7 +575,7 @@ def download_latest(
          print(json.loads(response.text)['message'])
       except json.JSONDecodeError:
          print(response.text)
-      if not os.path.exists(destination_folder):
+      if not destination_folder.exists():
          response.raise_for_status()
       return None
    if url.endswith('/releases'):
@@ -582,13 +596,13 @@ def download_latest(
       if not asset_filter(asset):
          continue
       asset_date = datetime.datetime.fromisoformat(asset['updated_at'].replace('Z', '+00:00'))
-      if last_date is None or asset_date > last_date or not os.path.exists(destination_folder):
+      if last_date is None or asset_date > last_date or not destination_folder.exists():
          print(f'Downloading update: {release["tag_name"]}')
          response = requests.get(asset['browser_download_url'], timeout=10)
          if response.status_code != 200:
             print(f'Error {response.status_code}!')
             print(response.text)
-            if not os.path.exists(destination_folder):
+            if not destination_folder.exists():
                response.raise_for_status()
             return None
          with tempfile.TemporaryDirectory() as temp_folder:
@@ -596,12 +610,12 @@ def download_latest(
             temp_zip = temp_folder_path / 'archive.zip'
             with open(temp_zip, 'wb') as file:
                file.write(response.content)
-            os.makedirs(destination_folder, exist_ok=True)
+            destination_folder.mkdir(parents=True, exist_ok=True)
             if has_extra_folder:
                temp_extract = temp_folder_path / 'extract'
-               os.makedirs(temp_extract, exist_ok=True)
+               temp_extract.mkdir(parents=True, exist_ok=True)
                extract_with_filter(temp_zip, temp_extract, extract_filter)
-               shutil.copytree(os.path.join(temp_extract, os.listdir(temp_extract)[0]), destination_folder, dirs_exist_ok=True)
+               shutil.copytree(temp_extract / next(temp_extract.iterdir()), destination_folder, dirs_exist_ok=True)
             else:
                extract_with_filter(temp_zip, destination_folder, extract_filter)
          return asset_date
