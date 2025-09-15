@@ -15,7 +15,8 @@ import platform
 import pyunpack
 import pathlib
 import shlex
-from settings import KhGame, LaunchExe, Luabackend, OpenKh, Randomizer, Settings, get_settings, save_settings
+import mslex
+from settings import KhGame, LaunchExe, Luabackend, OpenKh, Randomizer, Settings, WineRuntime, get_settings, save_settings
 
 def main():
    settings_path = pathlib.Path(__file__).parent / 'settings.yaml'
@@ -61,11 +62,43 @@ def main():
    if (randomizer := settings.mods.randomizer) is not None:
       check_randomizer(randomizer, settings, settings_path)
    
-   for game in settings.games.get_all():
-      for exe in game.get_exes():
-         environment.make_launch(game, exe, settings)
-   
+   if (game := settings.games.kh15_25) is not None:
+      make_launch(game, game.kh1, environment, settings, lua=True, openkh=True, refined=False)
+      make_launch(game, game.kh2, environment, settings, lua=True, openkh=True, refined=True)
+      make_launch(game, game.khbbs, environment, settings, lua=True, openkh=True, refined=False)
+      make_launch(game, game.khrecom, environment, settings, lua=True, openkh=True, refined=False)
+   if (game := settings.games.kh28) is not None:
+      make_launch(game, game.khddd, environment, settings, lua=True, openkh=True, refined=False)
+      make_launch(game, game.kh02, environment, settings, lua=False, openkh=False, refined=False)
+   if (game := settings.games.kh3) is not None:
+      make_launch(game, game.kh3, environment, settings, lua=False, openkh=False, refined=False)
+   if (game := settings.games.khmom) is not None:
+      make_launch(game, game.khmom, environment, settings, lua=False, openkh=False, refined=False)
+      
    symlinks.commit()
+
+def get_access_folders(game: KhGame, settings: Settings, lua: bool, openkh: bool, refined: bool) -> tuple[list[pathlib.Path], list[pathlib.Path]]:
+   readable: list[pathlib.Path] = [game.folder]
+   if game.workspace is not None:
+      readable.append(game.workspace)
+   if lua and settings.mods.luabackend is not None:
+      readable.append(settings.mods.luabackend.folder)
+      readable.append(settings.mods.luabackend.settings.parent)
+      if settings.mods.luabackend.scripts is not None:
+         readable.append(settings.mods.luabackend.scripts)
+   if openkh and settings.mods.openkh is not None:
+      readable.append(settings.mods.openkh.folder)
+      if settings.mods.openkh.panacea is not None:
+         readable.append(settings.mods.openkh.panacea.settings.parent)
+      if settings.mods.openkh.mods is not None:
+         readable.append(settings.mods.openkh.mods)
+   if refined and settings.mods.refined is not None:
+      readable.append(settings.mods.refined.settings)
+   readable = list(dict.fromkeys(readable))
+   writable: list[pathlib.Path] = []
+   if game.saves is not None:
+      writable.append(game.saves)
+   return (readable, writable)
 
 def set_data(data: dict[str, str] | tomlkit.items.AbstractTable, key: str, value: typing.Any) -> bool:
    current = data.get(key)
@@ -96,7 +129,7 @@ class Environment:
    @abc.abstractmethod
    def run_program(self, game: KhGame, args: list[str]) -> subprocess.CompletedProcess: pass
    @abc.abstractmethod
-   def make_launch(self, game: KhGame, exe: LaunchExe, settings: Settings): pass
+   def make_launch(self, file: typing.TextIO, directory: pathlib.Path, exe: pathlib.Path, env: dict[str, str]): pass
    @classmethod
    @abc.abstractmethod
    def is_linux(cls) -> bool: pass
@@ -111,32 +144,32 @@ class WindowsEnvironment(Environment):
    def run_program(self, game: KhGame, args: list[str]) -> subprocess.CompletedProcess:
       return subprocess.run(args, check=True)
    
-   def make_launch(self, game: KhGame, exe: LaunchExe, settings: Settings):
-      if exe.launch is None:
-         return
-      folder = game.get_workspace()
-      folder.mkdir(parents=True, exist_ok=True)
-      exe.launch.parent.mkdir(parents=True, exist_ok=True)
-      with open(exe.launch, 'w', encoding='utf-8') as sh_file:
-         sh_file.writelines([
-            f'cd /d "{folder}" || exit 1\n',
-            f'"{game.folder / exe.exe()}"\n'
-         ])
-      filestat = exe.launch.stat()
-      exe.launch.chmod(filestat.st_mode | stat.S_IEXEC)
+   def make_launch(self, file: typing.TextIO, directory: pathlib.Path, exe: pathlib.Path, env: dict[str, str]):
+      file.writelines([
+         f'cd /d {mslex.quote(str(directory))} || exit 1\n',
+         *[f'set {key}={mslex.quote(value)}' for key, value in env.items()],
+         f'{mslex.quote(str(exe))}\n',
+      ])
    
    @classmethod
    def is_linux(cls) -> bool:
       return False
 
 class LinuxEnvironment(Environment):
+   def __init__(self, runtime: WineRuntime):
+      self.runtime = runtime
+   
    def user_folder(self, game: KhGame) -> pathlib.Path:
       assert game.wineprefix is not None
       return game.wineprefix / 'drive_c/users' / os.getlogin()
    
-   def wine_env(self, game: KhGame):
+   def wine_env(self, game: KhGame) -> dict[str, str]:
       assert game.wineprefix is not None
-      return dict(os.environ, WINEPREFIX=str(game.wineprefix), PROTONPATH='GE-Proton')
+      env: dict[str, str] = dict(os.environ)
+      env['WINEPREFIX'] = str(game.wineprefix)
+      if self.runtime == 'umu':
+         env['PROTONPATH'] = 'GE-Proton'
+      return env
    
    def convert_path(self, game: KhGame, path: pathlib.Path) -> pathlib.Path:
       result = subprocess.run(
@@ -157,73 +190,70 @@ class LinuxEnvironment(Environment):
          env=self.wine_env(game)
       )
    
-   def make_launch(self, game: KhGame, exe: LaunchExe, settings: Settings):
-      if exe.launch is None:
-         return
-      assert game.wineprefix is not None
-      readable: list[pathlib.Path] = [game.folder]
-      if game.workspace is not None:
-         readable.append(game.workspace)
-      if settings.mods.luabackend is not None:
-         readable.append(settings.mods.luabackend.folder)
-         readable.append(settings.mods.luabackend.settings.parent)
-         if settings.mods.luabackend.scripts is not None:
-            readable.append(settings.mods.luabackend.scripts)
-      if settings.mods.openkh is not None:
-         readable.append(settings.mods.openkh.folder)
-         if settings.mods.openkh.panacea is not None:
-            readable.append(settings.mods.openkh.panacea.settings.parent)
-         if settings.mods.openkh.mods is not None:
-            readable.append(settings.mods.openkh.mods)
-      if settings.mods.refined is not None:
-         readable.append(settings.mods.refined.settings)
-      readable = list(dict.fromkeys(readable))
-      writable: list[pathlib.Path] = []
-      if game.saves is not None:
-         writable.append(game.saves)
-      dlls: dict[str, str] = {
-         'version': 'n,b',
-         'dinput8': 'n,b',
-      }
-      env_vars: dict[str, str] = {
-         'WINEPREFIX': str(game.wineprefix),
-         'PROTONPATH': 'GE-Proton',
-         'PRESSURE_VESSEL_FILESYSTEMS_RO': ':'.join((str(x) for x in readable)),
-         'PRESSURE_VESSEL_FILESYSTEMS_RW': ':'.join((str(x) for x in writable)),
-         'WINEFSYNC': '1',
-         'WINE_FULLSCREEN_FSR': '1',
-         'WINEDEBUG': '-all',
-         'WINEDLLOVERRIDES': ';'.join(f'{key}={value}' for key, value in dlls.items()),
-         'GAMEID': game.umu_id(),
-         'STORE': {'steam': 'steam', 'epic': 'egs'}[settings.store],
-      }
-      exe.launch.parent.mkdir(parents=True, exist_ok=True)
-      with open(exe.launch, 'w', encoding='utf-8') as sh_file:
-         env = ' '.join(f'{key}={shlex.quote(value)}' for key, value in env_vars.items())
-         sh_file.writelines([
-            '#!/bin/sh\n',
-            f'{env} exec umu-run start /wait /b /d {shlex.quote(str(self.convert_path(game, game.get_workspace())))} {shlex.quote(str(self.convert_path(game, game.folder / exe.exe())))}\n',
-         ])
-      filestat = exe.launch.stat()
-      exe.launch.chmod(filestat.st_mode | stat.S_IEXEC)
+   def make_launch(self, file: typing.TextIO, directory: pathlib.Path, exe: pathlib.Path, env: dict[str, str]):
+      env_str = ' '.join(f'{key}={shlex.quote(value)}' for key, value in env.items())
+      entry = {'wine': 'wine', 'umu': 'umu-run'}[self.runtime]
+      file.writelines([
+         '#!/bin/sh\n',
+         f'{env_str} exec {entry} start /wait /b /d {shlex.quote(str(directory))} {shlex.quote(str(exe))}\n',
+      ])
    
    @classmethod
    def is_linux(cls) -> bool:
       return True
 
+def make_env(game: KhGame, environment: Environment, settings: Settings, lua: bool, openkh: bool, refined: bool) -> dict[str, str]:
+   if not environment.is_linux():
+      return {}
+   read, write = get_access_folders(game, settings, lua=lua, openkh=openkh, refined=refined)
+   dlls: dict[str, str] = {}
+   if openkh and settings.mods.openkh is not None and settings.mods.openkh.panacea is not None:
+      dlls['version'] = 'n,b'
+   if lua and settings.mods.luabackend is not None:
+      dlls['dinput8'] = 'n,b'
+   assert game.wineprefix is not None
+   env: dict[str, str] = {
+      'WINEPREFIX': str(game.wineprefix),
+      'WINEDLLOVERRIDES': ';'.join(f'{key}={value}' for key, value in dlls.items()),
+      'WINEFSYNC': '1',
+      'WINE_FULLSCREEN_FSR': '1',
+      'WINEDEBUG': '-all'
+   }
+   if isinstance(environment, LinuxEnvironment) and environment.runtime == 'umu':
+      env |= {
+         'PROTONPATH': 'GE-Proton',
+         'GAMEID': game.umu_id(),
+         'STORE': {'steam': 'steam', 'epic': 'egs'}[settings.store],
+         'PRESSURE_VESSEL_FILESYSTEMS_RO': ':'.join((str(x) for x in read)),
+         'PRESSURE_VESSEL_FILESYSTEMS_RW': ':'.join((str(x) for x in write)),
+      }
+   return env
+
+def make_launch(game: KhGame, launch: LaunchExe, environment: Environment, settings: Settings, lua: bool, openkh: bool, refined: bool):
+   if launch.launch is None:
+      return
+   env = make_env(game, environment, settings, lua=lua, openkh=openkh, refined=refined)
+   launch.launch.parent.mkdir(parents=True, exist_ok=True)
+   with open(launch.launch, 'w', encoding='utf-8') as sh_file:
+      environment.make_launch(sh_file, game.get_workspace(), game.folder / launch.exe(), env)
+   filestat = launch.launch.stat()
+   launch.launch.chmod(filestat.st_mode | stat.S_IEXEC)
+
 def get_environment(settings: Settings) -> Environment:
    is_linux = platform.system() == 'Linux'
    if is_linux:
       print('Linux detected')
-      environment = LinuxEnvironment()
+      assert settings.runtime is not None
+      environment = LinuxEnvironment(settings.runtime)
       for game in settings.games.get_all():
          assert game.wineprefix is not None
          game.wineprefix.mkdir(parents=True, exist_ok=True)
          user_folder = environment.user_folder(game)
          if not user_folder.exists():
             print('Creating wineprefix')
+            entry = {'wine': 'wine', 'umu': 'umu-run'}[environment.runtime]
             subprocess.run(
-               ['umu-run', 'wineboot', '-k'],
+               [entry, 'wineboot', '-k'],
                check=True,
                env=environment.wine_env(game)
             )
