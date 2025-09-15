@@ -261,6 +261,34 @@ def get_environment(settings: Settings) -> Environment:
          if docs_folder.is_symlink():
             print('Unlinking new documents folder')
             docs_folder.unlink()
+      if environment.runtime == 'wine':
+         for game in settings.games.get_classic():
+            assert game.wineprefix is not None
+            winetricks = get_winetricks(game.wineprefix)
+            if 'vkd3d' not in winetricks:
+               print('Installing vkd3d to wineprefix')
+               subprocess.run(
+                  ['winetricks', '-q', 'vkd3d'],
+                  check=True,
+                  env=environment.wine_env(game)
+               )
+            if 'dxvk' not in winetricks:
+               print('Installing dxvk to wineprefix')
+               subprocess.run(
+                  ['winetricks', '-q', 'dxvk'],
+                  check=True,
+                  env=environment.wine_env(game)
+               )
+         if (game := settings.games.kh3) is not None:
+            assert game.wineprefix is not None
+            winetricks = get_winetricks(game.wineprefix)
+            if 'wmp11' not in winetricks:
+               print('Installing wmp11 to wineprefix')
+               subprocess.run(
+                  ['winetricks', '-q', 'wmp11'],
+                  check=True,
+                  env=environment.wine_env(game)
+               )
       return environment
    else:
       print('Windows detected')
