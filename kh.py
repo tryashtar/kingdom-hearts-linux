@@ -1,26 +1,76 @@
 import abc
-import typing
-import requests
-import json
-import shutil
-import os
-import subprocess
+import argparse
 import datetime
-import tomlkit
-import tomlkit.items
-import yaml
-import tempfile
-import stat
-import platform
-import pyunpack
+import json
+import os
 import pathlib
+import platform
 import shlex
+import shutil
+import stat
+import subprocess
+import tempfile
+import tomlkit
 import mslex
-from settings import KhGame, LaunchExe, Luabackend, OpenKh, Randomizer, Settings, WineRuntime, get_settings, save_settings
+import pyunpack
+import requests
+import tomlkit.items
+import typing
+import yaml
+from settings import Games, KhGame, LaunchExe, Luabackend, Mods, OpenKh, Randomizer, Settings, WineRuntime, get_settings, save_settings
 
 def main():
-   settings_path = pathlib.Path(__file__).parent / 'settings.yaml'
-   settings = get_settings(settings_path)
+   games: list[str] = ['kh1', 'kh2', 'khrecom', 'khbbs', 'khddd']
+   parser = argparse.ArgumentParser()
+   parser.add_argument('--settings', type=pathlib.Path, default=pathlib.Path(__file__).parent / 'settings.yaml')
+   commands = parser.add_subparsers(dest='command', required=True)
+   commands.add_parser('update')
+   mods = commands.add_parser('mods')
+   mods.add_argument('game', type=str, choices=games)
+   mods_action = mods.add_subparsers(dest='action', required=True)
+   mods_add = mods_action.add_parser('add')
+   mods_add.add_argument('mod', type=pathlib.PurePath)
+   mods_enable = mods_action.add_parser('enable')
+   mods_enable.add_argument('mod', type=pathlib.PurePath)
+   enable_order = mods_enable.add_subparsers(dest='order', required=True)
+   enable_order.add_parser('top')
+   enable_order.add_parser('bottom')
+   enable_above = enable_order.add_parser('above')
+   enable_above.add_argument('existing', type=pathlib.PurePath)
+   enable_below = enable_order.add_parser('below')
+   enable_below.add_argument('existing', type=pathlib.PurePath)
+   mods_disable = mods_action.add_parser('disable')
+   mods_disable.add_argument('mod', type=pathlib.PurePath)
+   args = parser.parse_args()
+   settings_path: pathlib.Path = args.settings
+   if not settings_path.exists():
+      settings = initial_run(settings_path)
+   else:
+      settings = get_settings(settings_path)
+   match args.command:
+      case 'mods':
+         if (openkh := settings.mods.openkh) is None:
+            print('OpenKh not configured in settings')
+            return
+         handle_mods(args, openkh, settings, settings_path)
+      case 'update':
+         update(settings, args.settings)
+
+def handle_mods(args: argparse.Namespace, openkh: OpenKh, settings: Settings, settings_path: pathlib.Path):
+   symlinks = Symlinks()
+   environment = get_environment(settings)
+   openkh_settings = check_openkh(openkh, symlinks, environment, settings, settings_path)
+   match args.action:
+      case 'add':
+         download_mod(args.game, args.mod, environment, settings, openkh, openkh_settings)
+      case 'enable':
+         order = args.order if args.order in ['top', 'bottom'] else (args.order, args.existing)
+         enable_mod(args.game, args.mod, order, environment, settings, openkh, openkh_settings)
+      case 'disable':
+         disable_mod(args.game, args.mod, environment, settings, openkh, openkh_settings)
+   symlinks.commit()
+
+def update(settings: Settings, settings_path: pathlib.Path):
    print('Starting!')
 
    symlinks = Symlinks()
@@ -62,6 +112,9 @@ def main():
    if (randomizer := settings.mods.randomizer) is not None:
       check_randomizer(randomizer, settings, settings_path)
    
+   if (openkh := settings.mods.openkh) is not None and openkh_settings is not None:
+      mod_games(openkh, openkh_settings, environment, settings, settings_path)
+   
    if (game := settings.games.kh15_25) is not None:
       make_launch(game, game.kh1, environment, settings, lua=True, openkh=True, refined=False, kh3=False)
       make_launch(game, game.kh2, environment, settings, lua=True, openkh=True, refined=True, kh3=False)
@@ -76,6 +129,29 @@ def main():
       make_launch(game, game.khmom, environment, settings, lua=False, openkh=False, refined=False, kh3=False)
       
    symlinks.commit()
+
+def initial_run(settings_path: pathlib.Path) -> Settings:
+   settings = Settings(
+      epic_id = None,
+      steam_id = None,
+      runtime = None,
+      store = 'epic',
+      games = Games(
+         kh15_25 = None,
+         kh28 = None,
+         kh3 = None,
+         khmom = None
+      ),
+      mods = Mods(
+         openkh = None,
+         luabackend = None,
+         refined = None,
+         randomizer = None,
+         kh3 = None
+      ),
+   )
+   save_settings(settings, settings_path)
+   return settings
 
 def get_access_folders(game: KhGame, settings: Settings, lua: bool, openkh: bool, refined: bool, kh3: bool) -> tuple[list[pathlib.Path], list[pathlib.Path]]:
    readable: list[pathlib.Path] = [game.folder]
@@ -221,6 +297,98 @@ class LinuxEnvironment(Environment):
    @classmethod
    def is_linux(cls) -> bool:
       return True
+
+def get_enabled_mods(game: str, openkh: OpenKh) -> list[pathlib.PurePath]:
+   game_txt = {'kh1': 'KH1', 'kh2': 'KH2', 'khbbs': 'BBS', 'khrecom': 'ReCoM', 'khddd': 'KH3D'}[game]
+   enabled_path = openkh.folder / f'mods-{game_txt}.txt'
+   if enabled_path.exists():
+      with open(enabled_path, 'r', encoding='utf-8') as file:
+         return [pathlib.PurePath(line.rstrip('\n')) for line in file.readlines()]
+   return []
+
+def set_enabled_mods(game: str, mods: list[pathlib.PurePath], openkh: OpenKh):
+   game_txt = {'kh1': 'KH1', 'kh2': 'KH2', 'khbbs': 'BBS', 'khrecom': 'ReCoM', 'khddd': 'KH3D'}[game]
+   enabled_path = openkh.folder / f'mods-{game_txt}.txt'
+   with open(enabled_path, 'w', encoding='utf-8') as file:
+      file.writelines(str(line) + '\n' for line in mods)
+
+def download_mod(game: str, mod: pathlib.PurePath, environment: Environment, settings: Settings, openkh: OpenKh, openkh_settings: dict[str, typing.Any]):
+   url = f'https://github.com/{mod}'
+   folder = mod_folder(game, mod, environment, settings, openkh_settings)
+   if folder is None:
+      print(f'Game {game} not found')
+      return
+   folder.mkdir(parents=True, exist_ok=True)
+   if (folder / '.git').exists():
+      subprocess.run(
+         ['git', 'pull', '--recurse-submodules'],
+         cwd=folder,
+         check=True
+      )
+   else:
+      subprocess.run(
+         ['git', 'clone', '--recurse-submodules', url, str(folder)],
+         check=True
+      )
+   mods = get_enabled_mods(game, openkh)
+   mods.insert(0, mod)
+   set_enabled_mods(game, mods, openkh)
+
+def mod_folder(game: str, mod: pathlib.PurePath, environment: Environment, settings: Settings, openkh_settings: dict[str, typing.Any]) -> pathlib.Path | None:
+   mod_in = pathlib.PureWindowsPath(openkh_settings['modCollectionPath'])
+   game_obj: KhGame | None = {
+      'kh1': settings.games.kh15_25,
+      'kh2': settings.games.kh15_25,
+      'khbbs': settings.games.kh15_25,
+      'khrecom': settings.games.kh15_25,
+      'khddd': settings.games.kh28
+   }[game]
+   if game_obj is None:
+      return None
+   local_in = environment.convert_path_back(game_obj, mod_in)
+   return local_in / game / mod
+
+def disable_mod(game: str, mod: pathlib.PurePath, environment: Environment, settings: Settings, openkh: OpenKh, openkh_settings: dict[str, typing.Any]):
+   if (folder := mod_folder(game, mod, environment, settings, openkh_settings)) is None or not folder.exists():
+      print(f'Mod {mod} in {game} not found')
+      return
+   enabled_mods = get_enabled_mods(game, openkh)
+   if mod not in enabled_mods:
+      print(f'Mod {mod} in {game} is already disabled')
+      return
+   print(f'Disabled mod {mod} in {game}')
+   enabled_mods.remove(mod)
+   set_enabled_mods(game, enabled_mods, openkh)
+
+ModOrder = typing.Literal['top', 'bottom'] | tuple[typing.Literal['above', 'below'], pathlib.PurePath]
+
+def enable_mod(game: str, mod: pathlib.PurePath, order: ModOrder, environment: Environment, settings: Settings, openkh: OpenKh, openkh_settings: dict[str, typing.Any]):
+   if (folder := mod_folder(game, mod, environment, settings, openkh_settings)) is None or not folder.exists():
+      print(f'Mod {mod} in {game} not found')
+      return
+   enabled_mods = get_enabled_mods(game, openkh)
+   if mod in enabled_mods:
+      enabled_mods.remove(mod)
+   match order:
+      case 'top':
+         index = 0
+      case 'bottom':
+         index = len(enabled_mods)
+      case (rel, existing):
+         if (folder := mod_folder(game, existing, environment, settings, openkh_settings)) is None or not folder.exists():
+            print(f'Mod {existing} in {game} not found')
+            return
+         if existing not in enabled_mods:
+            print(f'Mod {existing} in {game} not enabled')
+            return
+         match rel:
+            case 'above':
+               index = enabled_mods.index(existing)
+            case 'below':
+               index = enabled_mods.index(existing) + 1
+   print(f'Enabled mod {mod} in {game}')
+   enabled_mods.insert(index, mod)
+   set_enabled_mods(game, enabled_mods, openkh)
 
 def make_env(game: KhGame, environment: Environment, settings: Settings, lua: bool, openkh: bool, refined: bool, kh3: bool) -> dict[str, str]:
    if not environment.is_linux():
@@ -445,6 +613,7 @@ def check_openkh(openkh: OpenKh, symlinks: Symlinks, environment: Environment, s
          mgr_data = {
             'wizardVersionNumber': 1,
             'gameEdition': 2,
+            'modCollectionPath': str(environment.convert_path(use_game, openkh.folder / 'mods')),
             'gameModPath': str(environment.convert_path(use_game, openkh.folder / 'mod')),
             'gameDataPath': str(environment.convert_path(use_game, openkh.folder / 'data')),
          }
@@ -490,6 +659,9 @@ def check_openkh(openkh: OpenKh, symlinks: Symlinks, environment: Environment, s
          with open(openkh.panacea.settings, 'w', encoding='utf-8') as mods_file:
             mods_file.writelines([f'{key}={value}\n' for key, value in pana_data.items()])
    
+   return mgr_data
+
+def mod_games(openkh: OpenKh, openkh_settings: dict[str, typing.Any], environment: Environment, settings: Settings, settings_path: pathlib.Path):
    rebuild: set[str] = set()
    if openkh.update_mods:
       print('Updating mods')
@@ -523,11 +695,9 @@ def check_openkh(openkh: OpenKh, symlinks: Symlinks, environment: Environment, s
                   rebuild.add(game.name)
 
    if settings.games.kh15_25 is not None:
-      mod_game(settings.games.kh15_25, {'kh1': 'KH1', 'kh2': 'KH2', 'bbs': 'BBS', 'Recom': 'ReCoM'}, rebuild, openkh, mgr_data, environment, settings, settings_path)
+      mod_game(settings.games.kh15_25, {'kh1': 'KH1', 'kh2': 'KH2', 'bbs': 'BBS', 'Recom': 'ReCoM'}, rebuild, openkh, openkh_settings, environment, settings, settings_path)
    if settings.games.kh28 is not None:
-      mod_game(settings.games.kh28, {'kh3d': 'KH3D'}, rebuild, openkh, mgr_data, environment, settings, settings_path)
-   
-   return mgr_data
+      mod_game(settings.games.kh28, {'kh3d': 'KH3D'}, rebuild, openkh, openkh_settings, environment, settings, settings_path)
 
 def mod_game(game: KhGame, ids: dict[str, str], rebuild: set[str], openkh: OpenKh, openkh_settings: dict[str, typing.Any], environment: Environment, settings: Settings, settings_path: pathlib.Path):
    latest_modified: datetime.datetime | None = None

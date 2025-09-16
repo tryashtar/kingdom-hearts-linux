@@ -207,9 +207,9 @@ class Settings:
    epic_id: typing.Optional[int]
    steam_id: typing.Optional[int]
    store: StoreKind
+   runtime: typing.Optional[WineRuntime]
    games: Games
    mods: Mods
-   runtime: typing.Optional[WineRuntime]
    
 def save_settings(settings: Settings, path: pathlib.Path):
    with open(path, 'w', encoding='utf-8') as data_file:
