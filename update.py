@@ -81,17 +81,17 @@ def get_access_folders(game: KhGame, settings: Settings, lua: bool, openkh: bool
    readable: list[pathlib.Path] = [game.folder]
    if game.workspace is not None:
       readable.append(game.workspace)
-   if lua and settings.mods.luabackend is not None:
-      readable.append(settings.mods.luabackend.folder)
-      readable.append(settings.mods.luabackend.settings.parent)
-      if settings.mods.luabackend.scripts is not None:
-         readable.append(settings.mods.luabackend.scripts)
-   if openkh and settings.mods.openkh is not None:
-      readable.append(settings.mods.openkh.folder)
-      if settings.mods.openkh.panacea is not None:
-         readable.append(settings.mods.openkh.panacea.settings.parent)
-      if settings.mods.openkh.mods is not None:
-         readable.append(settings.mods.openkh.mods)
+   if lua and (luabackend := settings.mods.luabackend) is not None:
+      readable.append(luabackend.folder)
+      readable.append(luabackend.settings.parent)
+      if luabackend.scripts is not None:
+         readable.append(luabackend.scripts)
+   if openkh and (okh := settings.mods.openkh) is not None:
+      readable.append(okh.folder)
+      if okh.panacea is not None:
+         readable.append(okh.panacea.settings.parent)
+      if okh.mods is not None:
+         readable.append(okh.mods)
    if refined and settings.mods.refined is not None:
       readable.append(settings.mods.refined.settings)
    if kh3 and settings.mods.kh3 is not None:
@@ -118,6 +118,8 @@ def backup_folder(source: pathlib.Path, backup: pathlib.Path):
 
 def restore_folder(source: pathlib.Path, backup: pathlib.Path):
    if backup.exists():
+      shutil.rmtree(source)
+      source.mkdir(parents=True, exist_ok=True)
       for file in backup.iterdir():
          relative_name = file.relative_to(backup)
          shutil.copyfile(file, source / relative_name)
@@ -127,11 +129,13 @@ class Environment:
    @abc.abstractmethod
    def user_folder(self, game: KhGame) -> pathlib.Path: pass
    @abc.abstractmethod
-   def convert_path(self, game: KhGame, path: pathlib.Path) -> pathlib.Path: pass
+   def convert_path(self, game: KhGame, path: pathlib.Path) -> pathlib.PureWindowsPath: pass
+   @abc.abstractmethod
+   def convert_path_back(self, game: KhGame, path: pathlib.PureWindowsPath) -> pathlib.Path: pass
    @abc.abstractmethod
    def run_program(self, game: KhGame, args: list[str]) -> subprocess.CompletedProcess: pass
    @abc.abstractmethod
-   def make_launch(self, file: typing.TextIO, directory: pathlib.Path, exe: pathlib.Path, env: dict[str, str]): pass
+   def make_launch(self, file: typing.TextIO, directory: pathlib.PureWindowsPath, exe: pathlib.PureWindowsPath, env: dict[str, str]): pass
    @classmethod
    @abc.abstractmethod
    def is_linux(cls) -> bool: pass
@@ -140,14 +144,18 @@ class WindowsEnvironment(Environment):
    def user_folder(self, game: KhGame) -> pathlib.Path:
       return pathlib.Path.home()
    
-   def convert_path(self, game: KhGame, path: pathlib.Path) -> pathlib.Path:
-      return path
+   def convert_path(self, game: KhGame, path: pathlib.Path) -> pathlib.PureWindowsPath:
+      return pathlib.PureWindowsPath(path)
+   
+   def convert_path_back(self, game: KhGame, path: pathlib.PureWindowsPath) -> pathlib.Path:
+      return pathlib.Path(path)
    
    def run_program(self, game: KhGame, args: list[str]) -> subprocess.CompletedProcess:
       return subprocess.run(args, check=True)
    
-   def make_launch(self, file: typing.TextIO, directory: pathlib.Path, exe: pathlib.Path, env: dict[str, str]):
+   def make_launch(self, file: typing.TextIO, directory: pathlib.PureWindowsPath, exe: pathlib.PureWindowsPath, env: dict[str, str]):
       file.writelines([
+         '@echo off',
          f'cd /d {mslex.quote(str(directory))} || exit 1\n',
          *[f'set {key}={mslex.quote(value)}' for key, value in env.items()],
          f'{mslex.quote(str(exe))}\n',
@@ -173,9 +181,19 @@ class LinuxEnvironment(Environment):
          env['PROTONPATH'] = 'GE-Proton'
       return env
    
-   def convert_path(self, game: KhGame, path: pathlib.Path) -> pathlib.Path:
+   def convert_path(self, game: KhGame, path: pathlib.Path) -> pathlib.PureWindowsPath:
       result = subprocess.run(
-         ['winepath', '-w', str(path)],
+         ['winepath', '--windows', str(path)],
+         check=True,
+         stdout=subprocess.PIPE,
+         stderr=subprocess.DEVNULL,
+         env=self.wine_env(game)
+      ).stdout.decode('utf-8').rstrip('\n')
+      return pathlib.PureWindowsPath(result)
+   
+   def convert_path_back(self, game: KhGame, path: pathlib.PureWindowsPath) -> pathlib.Path:
+      result = subprocess.run(
+         ['winepath', '--unix', str(path)],
          check=True,
          stdout=subprocess.PIPE,
          stderr=subprocess.DEVNULL,
@@ -192,7 +210,7 @@ class LinuxEnvironment(Environment):
          env=self.wine_env(game)
       )
    
-   def make_launch(self, file: typing.TextIO, directory: pathlib.Path, exe: pathlib.Path, env: dict[str, str]):
+   def make_launch(self, file: typing.TextIO, directory: pathlib.PureWindowsPath, exe: pathlib.PureWindowsPath, env: dict[str, str]):
       env_str = ' '.join(f'{key}={shlex.quote(value)}' for key, value in env.items())
       entry = {'wine': 'wine', 'umu': 'umu-run'}[self.runtime]
       file.writelines([
@@ -255,7 +273,7 @@ def get_environment(settings: Settings) -> Environment:
             print('Creating wineprefix')
             entry = {'wine': 'wine', 'umu': 'umu-run'}[environment.runtime]
             subprocess.run(
-               [entry, 'wineboot', '-k'],
+               [entry, 'wineboot'],
                check=True,
                env=environment.wine_env(game)
             )
@@ -263,34 +281,42 @@ def get_environment(settings: Settings) -> Environment:
          if docs_folder.is_symlink():
             print('Unlinking new documents folder')
             docs_folder.unlink()
-      if environment.runtime == 'wine':
-         for game in settings.games.get_classic():
-            assert game.wineprefix is not None
-            winetricks = get_winetricks(game.wineprefix)
+      for game in settings.games.get_classic():
+         assert game.wineprefix is not None
+         winetricks = get_winetricks(game.wineprefix)
+         if 'dotnet6' not in winetricks:
+            print('Installing dotnet6 to wineprefix')
+            subprocess.run(
+               ['winetricks', '--unattended', 'dotnet6'],
+               check=True,
+               env=environment.wine_env(game)
+            )
+         if environment.runtime == 'wine':
             if 'vkd3d' not in winetricks:
                print('Installing vkd3d to wineprefix')
                subprocess.run(
-                  ['winetricks', '-q', 'vkd3d'],
+                  ['winetricks', '--unattended', 'vkd3d'],
                   check=True,
                   env=environment.wine_env(game)
                )
             if 'dxvk' not in winetricks:
                print('Installing dxvk to wineprefix')
                subprocess.run(
-                  ['winetricks', '-q', 'dxvk'],
+                  ['winetricks', '--unattended', 'dxvk'],
                   check=True,
                   env=environment.wine_env(game)
                )
          if (game := settings.games.kh3) is not None:
             assert game.wineprefix is not None
             winetricks = get_winetricks(game.wineprefix)
-            if 'wmp11' not in winetricks:
-               print('Installing wmp11 to wineprefix')
-               subprocess.run(
-                  ['winetricks', '-q', 'wmp11'],
-                  check=True,
-                  env=environment.wine_env(game)
-               )
+            if environment.runtime == 'wine':
+               if 'wmp11' not in winetricks:
+                  print('Installing wmp11 to wineprefix')
+                  subprocess.run(
+                     ['winetricks', '--unattended', 'wmp11'],
+                     check=True,
+                     env=environment.wine_env(game)
+                  )
       return environment
    else:
       print('Windows detected')
@@ -464,44 +490,46 @@ def check_openkh(openkh: OpenKh, symlinks: Symlinks, environment: Environment, s
          with open(openkh.panacea.settings, 'w', encoding='utf-8') as mods_file:
             mods_file.writelines([f'{key}={value}\n' for key, value in pana_data.items()])
    
-   rebuild: set[str] = set()            
+   rebuild: set[str] = set()
    if openkh.update_mods:
       print('Updating mods')
       mods_folder = openkh.mods if openkh.mods is not None else openkh.folder / 'mods'
       if mods_folder.exists():
          for game in mods_folder.iterdir():
-            if game.is_dir():
-               for root, folders, _files in game.walk():
-                  if '.git' in folders:
-                     print(f'Checking for updates for mod {root.name}')
-                     old_hash = subprocess.run(
-                        ['git', 'rev-parse', 'HEAD'],
-                        cwd=root,
-                        check=True,
-                        stdout=subprocess.PIPE
-                     ).stdout
-                     subprocess.run(
-                        ['git', 'pull', '--recurse-submodules'],
-                        cwd=root,
-                        check=True
-                     )
-                     new_hash = subprocess.run(
-                        ['git', 'rev-parse', 'HEAD'],
-                        cwd=root,
-                        check=True,
-                        stdout=subprocess.PIPE
-                     ).stdout
-                     if old_hash != new_hash:
-                        rebuild.add(game.name)
+            if not game.is_dir():
+               continue
+            for root, folders, _files in game.walk():
+               if not '.git' in folders:
+                  continue
+               print(f'Checking for updates for mod {root.name}')
+               old_hash = subprocess.run(
+                  ['git', 'rev-parse', 'HEAD'],
+                  cwd=root,
+                  check=True,
+                  stdout=subprocess.PIPE
+               ).stdout
+               subprocess.run(
+                  ['git', 'pull', '--recurse-submodules'],
+                  cwd=root,
+                  check=True
+               )
+               new_hash = subprocess.run(
+                  ['git', 'rev-parse', 'HEAD'],
+                  cwd=root,
+                  check=True,
+                  stdout=subprocess.PIPE
+               ).stdout
+               if old_hash != new_hash:
+                  rebuild.add(game.name)
 
    if settings.games.kh15_25 is not None:
-      mod_game(settings.games.kh15_25, {'kh1': 'KH1', 'kh2': 'KH2', 'bbs': 'BBS', 'Recom': 'ReCoM'}, rebuild, openkh, settings, settings_path)
+      mod_game(settings.games.kh15_25, {'kh1': 'KH1', 'kh2': 'KH2', 'bbs': 'BBS', 'Recom': 'ReCoM'}, rebuild, openkh, mgr_data, environment, settings, settings_path)
    if settings.games.kh28 is not None:
-      mod_game(settings.games.kh28, {'kh3d': 'KH3D'}, rebuild, openkh, settings, settings_path)
+      mod_game(settings.games.kh28, {'kh3d': 'KH3D'}, rebuild, openkh, mgr_data, environment, settings, settings_path)
    
    return mgr_data
 
-def mod_game(game: KhGame, ids: dict[str, str], rebuild: set[str], openkh: OpenKh, settings: Settings, settings_path: pathlib.Path):
+def mod_game(game: KhGame, ids: dict[str, str], rebuild: set[str], openkh: OpenKh, openkh_settings: dict[str, typing.Any], environment: Environment, settings: Settings, settings_path: pathlib.Path):
    latest_modified: datetime.datetime | None = None
    for gameid, text in ids.items():
       enabled_mods_path = openkh.folder / f'mods-{text}.txt'
@@ -511,8 +539,52 @@ def mod_game(game: KhGame, ids: dict[str, str], rebuild: set[str], openkh: OpenK
             latest_modified = modified
          if openkh.last_build is None or modified > openkh.last_build:
             rebuild.add(gameid)
-   for gameid in rebuild:
-      pass
+   data_folder = pathlib.PureWindowsPath(openkh_settings['gameDataPath'])
+   data_folder_local = environment.convert_path_back(game, data_folder)
+   mod_in = pathlib.PureWindowsPath(openkh_settings['modCollectionPath'])
+   mod_out = pathlib.PureWindowsPath(openkh_settings['gameModPath'])
+   image_source = game.folder / 'Image'
+   image_backup = game.folder / 'Image-BACKUP'
+   restore_folder(image_source, image_backup)
+   for gameid, text in ids.items():
+      if gameid not in rebuild:
+         continue
+      game_data_local = data_folder_local / gameid
+      if not game_data_local.exists():
+         print(f'Extracting {gameid} data (this will take some time)')
+         for root, _folders, files in image_source.walk():
+            for file in files:
+               if file.startswith(f'{gameid}_') and file.endswith('.hed'):
+                  environment.run_program(game, [
+                     str(openkh.folder / 'OpenKh.Command.IdxImg.exe'),
+                     'hed', 'extract', '--do-not-extract-again',
+                     '--output', str(data_folder / gameid),
+                     str(environment.convert_path(game, root / file)),
+                  ])
+         for entry in (game_data_local / 'original').iterdir():
+            shutil.move(entry, game_data_local)
+      print(f'Building {gameid} mods')
+      enabled_mods_path = openkh.folder / f'mods-{text}.txt'
+      environment.run_program(game, [
+         str(openkh.folder / 'OpenKh.Command.IdxImg.exe'),
+         'hed', 'build',
+         '--game_id', gameid,
+         '--output_folder', str(mod_out / gameid),
+         '--enabled_mods', str(environment.convert_path(game, enabled_mods_path)),
+         '--mods_folder', str(mod_in / gameid),
+         '--game_data', str(data_folder / gameid),
+      ])
+      if openkh.panacea is None:
+         print(f'Patching {gameid} mods')
+         backup_folder(image_source, image_backup)
+         environment.run_program(game, [
+            str(openkh.folder / 'OpenKh.Command.IdxImg.exe'),
+            'hed', 'full-patch',
+            '--build_folder', str(mod_out / gameid),
+            '--output_folder', str(environment.convert_path(game, image_source)),
+            '--source_folder', str(environment.convert_path(game, image_backup)),
+         ])
+
    if latest_modified is not None and (openkh.last_build is None or latest_modified > openkh.last_build):
       openkh.last_build = latest_modified
       save_settings(settings, settings_path)
@@ -548,24 +620,23 @@ def check_luabackend(luabackend: Luabackend, openkh_settings: dict[str, typing.A
    with open(luabackend.settings, 'r', encoding='utf-8') as mods_file:
       data = tomlkit.load(mods_file)
    changed = False
-   def add_scripts(key: str, game: KhGame, version: str, path: pathlib.Path):
-      script_path = environment.convert_path(game, path)
+   def add_scripts(key: str, version: str, path: pathlib.PureWindowsPath):
       block = data[version]
       assert isinstance(block, tomlkit.items.AbstractTable)
       script_section = block['scripts']
       assert isinstance(script_section, tomlkit.items.AoT)
       for entry in script_section:
          if entry.get('key') == key:
-            return set_data(entry, 'path', str(script_path))
-      script_section.append({'path': str(script_path), 'relative': False, 'key': key})
+            return set_data(entry, 'path', str(path))
+      script_section.append({'path': str(path), 'relative': False, 'key': key})
       print(f'Added {key} script entry {path}')
       return True
-   def add_openkh(game: KhGame, version: str) -> bool:
+   def add_openkh(version: str) -> bool:
       if openkh_settings is None:
          return False
-      game_folder = pathlib.Path(openkh_settings['gameModPath'])
+      game_folder = pathlib.PureWindowsPath(openkh_settings['gameModPath'])
       script_path = game_folder / version / 'scripts'
-      add_scripts('openkh', game, version, script_path)
+      add_scripts('openkh', version, script_path)
       return True
    if (game := settings.games.kh15_25) is not None:
       changed |= set_data(typing.cast(tomlkit.items.AbstractTable, data['kh1']), 'exe', str(game.kh1.exe()))
@@ -577,18 +648,18 @@ def check_luabackend(luabackend: Luabackend, openkh_settings: dict[str, typing.A
          path = 'My Games' / path
       for version in ['kh1', 'kh2', 'bbs', 'recom']:
          changed |= set_data(typing.cast(tomlkit.items.AbstractTable, data[version]), 'game_docs', str(path))
-         changed |= add_openkh(game, version)
+         changed |= add_openkh(version)
          if luabackend.scripts is not None:
-            changed |= add_scripts('lua', game, version, luabackend.scripts / version)
+            changed |= add_scripts('lua', version, environment.convert_path(game, luabackend.scripts / version))
    if (game := settings.games.kh28) is not None:
       changed |= set_data(typing.cast(tomlkit.items.AbstractTable, data['kh3d']), 'exe', str(game.khddd.exe()))
       path = game.saves_folder()
       if settings.store == 'steam':
          path = 'My Games' / path
       changed |= set_data(typing.cast(tomlkit.items.AbstractTable, data['kh3d']), 'game_docs', str(path))
-      changed |= add_openkh(game, 'kh3d')
+      changed |= add_openkh('kh3d')
       if luabackend.scripts is not None:
-            changed |= add_scripts('lua', game, 'kh3d', luabackend.scripts / 'kh3d')
+         changed |= add_scripts('lua', 'kh3d', environment.convert_path(game, luabackend.scripts / 'kh3d'))
    if changed:
       with open(luabackend.settings, 'w', encoding='utf-8') as mods_file:
          tomlkit.dump(data, mods_file)
