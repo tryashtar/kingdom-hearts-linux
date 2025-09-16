@@ -17,7 +17,7 @@ import requests
 import tomlkit.items
 import typing
 import yaml
-from settings import Games, KhGame, LaunchExe, Luabackend, Mods, OpenKh, Randomizer, Settings, WineRuntime, get_settings, save_settings
+from settings import Games, Kh1525, Kh28, Kh3, Kh3Mods, KhGame, KhMom, LaunchExe, LaunchKh02, LaunchKh1, LaunchKh2, LaunchKh3, LaunchKhBbs, LaunchKhDdd, LaunchKhMom, LaunchKhRecom, Luabackend, Mods, OpenKh, Panacea, Randomizer, Refined, Settings, WineRuntime, get_settings, save_settings
 
 def main():
    games: list[str] = ['kh1', 'kh2', 'khrecom', 'khbbs', 'khddd']
@@ -44,9 +44,9 @@ def main():
    args = parser.parse_args()
    settings_path: pathlib.Path = args.settings
    if not settings_path.exists():
-      settings = initial_run(settings_path)
-   else:
-      settings = get_settings(settings_path)
+      initial_run(settings_path)
+      return
+   settings = get_settings(settings_path)
    match args.command:
       case 'mods':
          if (openkh := settings.mods.openkh) is None:
@@ -64,14 +64,14 @@ def handle_mods(args: argparse.Namespace, openkh: OpenKh, settings: Settings, se
       case 'add':
          download_mod(args.game, args.mod, environment, settings, openkh, openkh_settings)
       case 'enable':
-         order = args.order if args.order in ['top', 'bottom'] else (args.order, args.existing)
+         order: ModOrder = args.order if args.order in ['top', 'bottom'] else (args.order, args.existing)
          enable_mod(args.game, args.mod, order, environment, settings, openkh, openkh_settings)
       case 'disable':
          disable_mod(args.game, args.mod, environment, settings, openkh, openkh_settings)
    symlinks.commit()
 
 def update(settings: Settings, settings_path: pathlib.Path):
-   print('Starting!')
+   print('Updating installations')
 
    symlinks = Symlinks()
    environment = get_environment(settings)
@@ -131,27 +131,137 @@ def update(settings: Settings, settings_path: pathlib.Path):
    symlinks.commit()
 
 def initial_run(settings_path: pathlib.Path) -> Settings:
+   print('First-time run, welcome!')
+   print('You\'ll be asked some questions about your setup. Every time you run this script, everything will be updated according to your answers. You can change them at any time by editing or deleting settings.yaml. Anything you disable later will be seamlessly reverted; all changes made by this script are reversible.')
+   print()
+   print('Input the folders where your Kingdom Hearts games are installed.')
+   print('For any you don\'t have, just press enter.')
+   print()
+   kh1525_install = input_game_path('Kingdom Hearts HD 1.5+2.5 ReMIX', pathlib.PurePath('KINGDOM HEARTS HD 1.5+2.5 ReMIX.exe'))
+   kh28_install = input_game_path('Kingdom Hearts HD 2.8 Final Chapter Prologue', pathlib.PurePath('KINGDOM HEARTS HD 2.8 Final Chapter Prologue.exe'))
+   kh3_install = input_game_path('Kingdom Hearts III', LaunchKh3.exe())
+   khmom_install = input_game_path('Kingdom Hearts Melody of Memory', LaunchKhMom.exe())
+   print('Now where would you like to store the extra stuff installed by this script?')
+   folder = input('> ')
+   extra_folder = pathlib.Path(os.path.expanduser(folder))
+   print()
+   print('Modding applications to use:')
+   print('Kingdom Hearts ReFined: (y/n)')
+   refined = False
+   randomizer = False
+   openkh = False
+   luabackend = False
+   if yes_no():
+      refined = True
+      openkh = True
+   print('Kingdom Hearts II Randomizer: (y/n)')
+   if yes_no():
+      randomizer = True
+      openkh =  True
+   if not openkh:
+      print('OpenKh mod manager: (y/n)')
+      if yes_no():
+         openkh = True
+   print('Luabackend script loader: (y/n)')
+   if yes_no():
+      luabackend = True
+   is_linux = platform.system() == 'Linux'
+   wineprefix = extra_folder / 'wineprefix' if is_linux else None
+   def launch(name: str) -> pathlib.Path | None:
+      return extra_folder / 'launch' / name if is_linux else None
+   saves = extra_folder / 'saves'
    settings = Settings(
       epic_id = None,
       steam_id = None,
       runtime = None,
       store = 'epic',
       games = Games(
-         kh15_25 = None,
-         kh28 = None,
-         kh3 = None,
-         khmom = None
+         kh15_25 = None if kh1525_install is None else Kh1525(
+            wineprefix = wineprefix,
+            saves = saves,
+            folder = kh1525_install,
+            workspace = None,
+            kh1 = LaunchKh1(launch = launch('kh1')),
+            kh2 = LaunchKh2(launch = launch('kh2')),
+            khrecom = LaunchKhRecom(launch = launch('khrecom')),
+            khbbs = LaunchKhBbs(launch = launch('khbbs')),
+         ),
+         kh28 = None if kh28_install is None else Kh28(
+            wineprefix = wineprefix,
+            saves = saves,
+            folder = kh28_install,
+            workspace = None,
+            khddd = LaunchKhDdd(launch = launch('khddd')),
+            kh02 = LaunchKh02(launch = launch('kh02')),
+         ),
+         kh3 = None if kh3_install is None else Kh3(
+            wineprefix = wineprefix,
+            saves = saves,
+            folder = kh3_install,
+            workspace = None,
+            kh3 = LaunchKh3(launch = launch('kh3')),
+         ),
+         khmom = None if khmom_install is None else KhMom(
+            wineprefix = wineprefix,
+            saves = saves,
+            folder = khmom_install,
+            workspace = None,
+            khmom = LaunchKhMom(launch = launch('khmom')),
+         ),
       ),
       mods = Mods(
-         openkh = None,
-         luabackend = None,
-         refined = None,
-         randomizer = None,
-         kh3 = None
+         openkh = None if not openkh else OpenKh(
+            folder = extra_folder / 'openkh',
+            mods = extra_folder / 'mods',
+            settings = None,
+            panacea = Panacea(
+               settings = extra_folder / 'panacea/panacea_settings.txt'
+            ),
+            update_mods = True,
+            update = True,
+            last_build = None,
+         ),
+         luabackend = None if not luabackend else Luabackend(
+            folder = extra_folder / 'luabackend',
+            settings = extra_folder / 'luabackend/LuaBackend.toml',
+            scripts = extra_folder / 'scripts',
+            update = True,
+         ),
+         refined = None if not refined else Refined(
+            folder = extra_folder / 'refined',
+            settings = extra_folder / 'refined/reFined.cfg',
+         ),
+         randomizer = None if not randomizer else Randomizer(
+            folder = extra_folder / 'randomizer',
+            update = True
+         ),
+         kh3 = None if kh3_install is None else Kh3Mods(
+            folder = extra_folder / 'mods/kh3'
+         ),
       ),
    )
    save_settings(settings, settings_path)
    return settings
+
+def yes_no():
+   while True:
+      answer = input('> ')
+      if answer in ('y','Y'):
+         return True
+      if answer in ('n','N'):
+         return False
+      print('Type Y for yes, or N for no')
+
+def input_game_path(name: str, exe: pathlib.PurePath) -> pathlib.Path | None:
+   print(name + ':')
+   while True:
+      install = input('> ')
+      if install == '':
+         return None
+      install_path = pathlib.Path(os.path.expanduser(install))
+      if (install_path / exe).exists():
+         return install_path
+      print(f'Couldn\t find \'{exe}\' in that folder. Please try again.')
 
 def get_access_folders(game: KhGame, settings: Settings, lua: bool, openkh: bool, refined: bool, kh3: bool) -> tuple[list[pathlib.Path], list[pathlib.Path]]:
    readable: list[pathlib.Path] = [game.folder]
@@ -169,7 +279,7 @@ def get_access_folders(game: KhGame, settings: Settings, lua: bool, openkh: bool
       if okh.mods is not None:
          readable.append(okh.mods)
    if refined and settings.mods.refined is not None:
-      readable.append(settings.mods.refined.settings)
+      readable.append(settings.mods.refined.settings.parent)
    if kh3 and settings.mods.kh3 is not None:
       readable.append(settings.mods.kh3.folder)
    readable = list(dict.fromkeys(readable))
@@ -614,6 +724,7 @@ def check_openkh(openkh: OpenKh, symlinks: Symlinks, environment: Environment, s
             'wizardVersionNumber': 1,
             'gameEdition': 2,
             'modCollectionPath': str(environment.convert_path(use_game, openkh.folder / 'mods')),
+            'modCollectionsPath': str(environment.convert_path(use_game, openkh.folder / 'mods/collections')),
             'gameModPath': str(environment.convert_path(use_game, openkh.folder / 'mod')),
             'gameDataPath': str(environment.convert_path(use_game, openkh.folder / 'data')),
          }

@@ -180,6 +180,7 @@ class Luabackend:
 
 @dataclasses.dataclass
 class Refined:
+   folder: pathlib.Path
    settings: pathlib.Path
 
 @dataclasses.dataclass
