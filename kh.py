@@ -92,6 +92,19 @@ def update(settings: Settings, settings_path: pathlib.Path):
       symlinks.remove(folder / 'LuaBackend.dll')
       symlinks.remove(folder / 'LuaBackend.toml')
       symlinks.remove(folder / 'panacea_settings.txt')
+      symlinks.remove(folder / 'dependencies/avcodec-vgmstream-59.dll')
+      symlinks.remove(folder / 'dependencies/avformat-vgmstream-59.dll')
+      symlinks.remove(folder / 'dependencies/avutil-vgmstream-57.dll')
+      symlinks.remove(folder / 'dependencies/bass.dll')
+      symlinks.remove(folder / 'dependencies/bass_vgmstream.dll')
+      symlinks.remove(folder / 'dependencies/libatrac9.dll')
+      symlinks.remove(folder / 'dependencies/libcelt-0061.dll')
+      symlinks.remove(folder / 'dependencies/libcelt-0110.dll')
+      symlinks.remove(folder / 'dependencies/libg719_decode.dll')
+      symlinks.remove(folder / 'dependencies/libmpg123-0.dll')
+      symlinks.remove(folder / 'dependencies/libspeex-1.dll')
+      symlinks.remove(folder / 'dependencies/libvorbis.dll')
+      symlinks.remove(folder / 'dependencies/swresample-vgmstream-4.dll')
       if settings.mods.openkh is None or settings.mods.openkh.panacea is not None:
          restore_folder(game.folder / 'Image', game.folder / 'Image-BACKUP')
 
@@ -562,10 +575,10 @@ def get_environment(settings: Settings) -> Environment:
       for game in settings.games.get_classic():
          assert game.wineprefix is not None
          winetricks = get_winetricks(game.wineprefix)
-         if 'dotnet6' not in winetricks:
-            print('Installing dotnet6 to wineprefix')
+         if 'dotnet8' not in winetricks:
+            print('Installing dotnet8 to wineprefix')
             subprocess.run(
-               ['winetricks', '--unattended', 'dotnet6'],
+               ['winetricks', '--unattended', 'dotnet8'],
                check=True,
                env=environment.wine_env(game)
             )
@@ -755,6 +768,19 @@ def check_openkh(openkh: OpenKh, symlinks: Symlinks, environment: Environment, s
          dll = 'version.dll' if environment.is_linux() else 'DBGHELP.dll'
          symlinks.make(game.folder / dll, openkh.folder / 'OpenKH.Panacea.dll', is_dir=False)
          symlinks.make(folder / 'panacea_settings.txt', openkh.panacea.settings, is_dir=False)
+         symlinks.make(folder / 'dependencies/avcodec-vgmstream-59.dll', openkh.folder / 'dependencies/avcodec-vgmstream-59.dll', is_dir=False)
+         symlinks.make(folder / 'dependencies/avformat-vgmstream-59.dll', openkh.folder / 'dependencies/avformat-vgmstream-59.dll', is_dir=False)
+         symlinks.make(folder / 'dependencies/avutil-vgmstream-57.dll', openkh.folder / 'dependencies/avutil-vgmstream-57.dll', is_dir=False)
+         symlinks.make(folder / 'dependencies/bass.dll', openkh.folder / 'dependencies/bass.dll', is_dir=False)
+         symlinks.make(folder / 'dependencies/bass_vgmstream.dll', openkh.folder / 'dependencies/bass_vgmstream.dll', is_dir=False)
+         symlinks.make(folder / 'dependencies/libatrac9.dll', openkh.folder / 'dependencies/libatrac9.dll', is_dir=False)
+         symlinks.make(folder / 'dependencies/libcelt-0061.dll', openkh.folder / 'dependencies/libcelt-0061.dll', is_dir=False)
+         symlinks.make(folder / 'dependencies/libcelt-0110.dll', openkh.folder / 'dependencies/libcelt-0110.dll', is_dir=False)
+         symlinks.make(folder / 'dependencies/libg719_decode.dll', openkh.folder / 'dependencies/libg719_decode.dll', is_dir=False)
+         symlinks.make(folder / 'dependencies/libmpg123-0.dll', openkh.folder / 'dependencies/libmpg123-0.dll', is_dir=False)
+         symlinks.make(folder / 'dependencies/libspeex-1.dll', openkh.folder / 'dependencies/libspeex-1.dll', is_dir=False)
+         symlinks.make(folder / 'dependencies/libvorbis.dll', openkh.folder / 'dependencies/libvorbis.dll', is_dir=False)
+         symlinks.make(folder / 'dependencies/swresample-vgmstream-4.dll', openkh.folder / 'dependencies/swresample-vgmstream-4.dll', is_dir=False)
       if not openkh.panacea.settings.exists():
          print('Creating default panacea settings')
          with open(openkh.panacea.settings, 'w', encoding='utf-8') as mods_file:
