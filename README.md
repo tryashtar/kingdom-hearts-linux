@@ -35,7 +35,7 @@ git clone https://github.com/tryashtar/kingdom-hearts-linux
 And run it:
 
 ```sh
-uv run update.py
+uv run kh.py
 ```
 
 First, it will ask you to input the folders where your games are installed. If you haven't installed them yet, you can run the installers through Wine. They don't need to go in your wineprefix; you can put them anywhere.
