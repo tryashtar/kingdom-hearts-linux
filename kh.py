@@ -28,6 +28,7 @@ def main():
    mods = commands.add_parser('mods')
    mods.add_argument('game', type=str, choices=games)
    mods_action = mods.add_subparsers(dest='action', required=True)
+   mods_action.add_parser('list')
    mods_add = mods_action.add_parser('add')
    mods_add.add_argument('mod', type=pathlib.PurePath)
    mods_enable = mods_action.add_parser('enable')
@@ -59,8 +60,10 @@ def main():
 def handle_mods(args: argparse.Namespace, openkh: OpenKh, settings: Settings, settings_path: pathlib.Path):
    symlinks = Symlinks()
    environment = get_environment(settings)
-   openkh_settings = check_openkh(openkh, symlinks, environment, settings, settings_path)
+   openkh_settings = check_openkh(openkh, symlinks, environment, settings, settings_path, check_updates=False)
    match args.action:
+      case 'list':
+         list_mods(args.game, environment, settings, openkh, openkh_settings)
       case 'add':
          download_mod(args.game, args.mod, environment, settings, openkh, openkh_settings)
       case 'enable':
@@ -115,7 +118,7 @@ def update(settings: Settings, settings_path: pathlib.Path):
          symlinks.make(mods, kh3.folder, is_dir=True)
    
    if (openkh := settings.mods.openkh) is not None:
-      openkh_settings = check_openkh(openkh, symlinks, environment, settings, settings_path)
+      openkh_settings = check_openkh(openkh, symlinks, environment, settings, settings_path, check_updates=True)
    else:
       openkh_settings = None
    
@@ -435,12 +438,34 @@ def set_enabled_mods(game: str, mods: list[pathlib.PurePath], openkh: OpenKh):
    with open(enabled_path, 'w', encoding='utf-8') as file:
       file.writelines(str(line) + '\n' for line in mods)
 
-def download_mod(game: str, mod: pathlib.PurePath, environment: Environment, settings: Settings, openkh: OpenKh, openkh_settings: dict[str, typing.Any]):
-   url = f'https://github.com/{mod}'
-   folder = mod_folder(game, mod, environment, settings, openkh_settings)
-   if folder is None:
+def list_mods(game: str, environment: Environment, settings: Settings, openkh: OpenKh, openkh_settings: dict[str, typing.Any]):
+   mods = mods_folder(game, environment, settings, openkh_settings)
+   if mods is None:
       print(f'Game {game} not found')
       return
+   all_mods: list[pathlib.PurePath] = []
+   for root, _folders, _files in mods.walk():
+      if (root / 'mod.yml').exists():
+         all_mods.append(root.relative_to(mods))
+   enabled_mods = get_enabled_mods(game, openkh)
+   print('Enabled:')
+   for mod in enabled_mods:
+      if mod in all_mods:
+         print(f'- {mod}')
+      else:
+         print(f'- {mod} (missing)')
+   print('Available:')
+   for mod in all_mods:
+      if mod not in enabled_mods:
+         print(f'- {mod}')
+
+def download_mod(game: str, mod: pathlib.PurePath, environment: Environment, settings: Settings, openkh: OpenKh, openkh_settings: dict[str, typing.Any]):
+   url = f'https://github.com/{mod}'
+   mods = mods_folder(game, environment, settings, openkh_settings)
+   if mods is None:
+      print(f'Game {game} not found')
+      return
+   folder = mods / mod
    folder.mkdir(parents=True, exist_ok=True)
    if (folder / '.git').exists():
       subprocess.run(
@@ -457,22 +482,34 @@ def download_mod(game: str, mod: pathlib.PurePath, environment: Environment, set
    mods.insert(0, mod)
    set_enabled_mods(game, mods, openkh)
 
-def mod_folder(game: str, mod: pathlib.PurePath, environment: Environment, settings: Settings, openkh_settings: dict[str, typing.Any]) -> pathlib.Path | None:
+def mods_folder(game: str, environment: Environment, settings: Settings, openkh_settings: dict[str, typing.Any]) -> pathlib.Path | None:
    mod_in = pathlib.PureWindowsPath(openkh_settings['modCollectionPath'])
    game_obj: KhGame | None = {
       'kh1': settings.games.kh15_25,
       'kh2': settings.games.kh15_25,
       'khbbs': settings.games.kh15_25,
       'khrecom': settings.games.kh15_25,
-      'khddd': settings.games.kh28
+      'khddd': settings.games.kh28,
+   }[game]
+   game_folder: str = {
+      'kh1': 'kh1',
+      'kh2': 'kh2',
+      'khbbs': 'bbs',
+      'khrecom': 'Recom',
+      'khddd': 'kh3d',
    }[game]
    if game_obj is None:
       return None
    local_in = environment.convert_path_back(game_obj, mod_in)
-   return local_in / game / mod
+   return local_in / game_folder
 
 def disable_mod(game: str, mod: pathlib.PurePath, environment: Environment, settings: Settings, openkh: OpenKh, openkh_settings: dict[str, typing.Any]):
-   if (folder := mod_folder(game, mod, environment, settings, openkh_settings)) is None or not folder.exists():
+   mods = mods_folder(game, environment, settings, openkh_settings)
+   if mods is None:
+      print(f'Game {game} not found')
+      return
+   folder = mods / mod
+   if not folder.exists():
       print(f'Mod {mod} in {game} not found')
       return
    enabled_mods = get_enabled_mods(game, openkh)
@@ -486,7 +523,12 @@ def disable_mod(game: str, mod: pathlib.PurePath, environment: Environment, sett
 ModOrder = typing.Literal['top', 'bottom'] | tuple[typing.Literal['above', 'below'], pathlib.PurePath]
 
 def enable_mod(game: str, mod: pathlib.PurePath, order: ModOrder, environment: Environment, settings: Settings, openkh: OpenKh, openkh_settings: dict[str, typing.Any]):
-   if (folder := mod_folder(game, mod, environment, settings, openkh_settings)) is None or not folder.exists():
+   mods = mods_folder(game, environment, settings, openkh_settings)
+   if mods is None:
+      print(f'Game {game} not found')
+      return
+   folder = mods / mod
+   if not folder.exists():
       print(f'Mod {mod} in {game} not found')
       return
    enabled_mods = get_enabled_mods(game, openkh)
@@ -498,7 +540,8 @@ def enable_mod(game: str, mod: pathlib.PurePath, order: ModOrder, environment: E
       case 'bottom':
          index = len(enabled_mods)
       case (rel, existing):
-         if (folder := mod_folder(game, existing, environment, settings, openkh_settings)) is None or not folder.exists():
+         existing_folder = mods / existing
+         if not existing_folder.exists():
             print(f'Mod {existing} in {game} not found')
             return
          if existing not in enabled_mods:
@@ -568,20 +611,26 @@ def get_environment(settings: Settings) -> Environment:
                check=True,
                env=environment.wine_env(game)
             )
-         docs_folder = user_folder / 'Documents'
-         if docs_folder.is_symlink():
-            print('Unlinking new documents folder')
-            docs_folder.unlink()
-      for game in settings.games.get_classic():
-         assert game.wineprefix is not None
-         winetricks = get_winetricks(game.wineprefix)
-         if 'dotnet8' not in winetricks:
-            print('Installing dotnet8 to wineprefix')
             subprocess.run(
-               ['winetricks', '--unattended', 'dotnet8'],
+               [entry, 'reg', 'add', 'HKEY_LOCAL_MACHINE\\System\\CurrentControlSet\\Services\\winebus', '/f', '/v', 'DisableHidraw', '/t', 'REG_DWORD', '/d', '1'],
                check=True,
                env=environment.wine_env(game)
             )
+            docs_folder = user_folder / 'Documents'
+            if docs_folder.is_symlink():
+               print('Unlinking new documents folder')
+               docs_folder.unlink()
+      for game in settings.games.get_classic():
+         assert game.wineprefix is not None
+         winetricks = get_winetricks(game.wineprefix)
+         if settings.mods.openkh is not None:
+            if 'dotnet8' not in winetricks:
+               print('Installing dotnet8 to wineprefix')
+               subprocess.run(
+                  ['winetricks', '--unattended', 'dotnet8'],
+                  check=True,
+                  env=environment.wine_env(game)
+               )
          if environment.runtime == 'wine':
             if 'vkd3d' not in winetricks:
                print('Installing vkd3d to wineprefix')
@@ -664,7 +713,7 @@ def handle_saves(game: KhGame, symlinks: Symlinks, environment: Environment, set
       if epic_id is not None:
          symlinks.remove(user_folder / 'Documents' / path_part / 'Epic Games Store' / str(epic_id))
       if steam_id is not None:
-         symlinks.remove(user_folder / 'Documents/My Games' / path_part / 'Steam' / str(epic_id))
+         symlinks.remove(user_folder / 'Documents/My Games' / path_part / 'Steam' / str(steam_id))
 
 def check_saves(symlinks: Symlinks, environment: Environment, settings: Settings):
    print('Checking save folders')
@@ -679,11 +728,11 @@ def check_saves(symlinks: Symlinks, environment: Environment, settings: Settings
          symlinks.remove(user_folder / 'Documents/Kingdom Hearts/Configuration')
          symlinks.remove(user_folder / 'Documents/Kingdom Hearts/Save Data')
 
-def check_openkh(openkh: OpenKh, symlinks: Symlinks, environment: Environment, settings: Settings, settings_path: pathlib.Path) -> dict[str, typing.Any]:
+def check_openkh(openkh: OpenKh, symlinks: Symlinks, environment: Environment, settings: Settings, settings_path: pathlib.Path, check_updates: bool) -> dict[str, typing.Any]:
    print('Checking OpenKh')
    default_manager_settings = openkh.folder / 'mods-manager.yml'
    manager_settings = openkh.settings if openkh.settings is not None else default_manager_settings
-   if (openkh.update != False) or not openkh.folder.exists():
+   if (openkh.update != False and check_updates) or not openkh.folder.exists():
       print('Checking for OpenKh updates...')
       downloaded = download_latest(
          last_date = openkh.update if isinstance(openkh.update, datetime.datetime) else None,
@@ -802,9 +851,9 @@ def mod_games(openkh: OpenKh, openkh_settings: dict[str, typing.Any], environmen
    rebuild: set[str] = set()
    if openkh.update_mods:
       print('Updating mods')
-      mods_folder = openkh.mods if openkh.mods is not None else openkh.folder / 'mods'
-      if mods_folder.exists():
-         for game in mods_folder.iterdir():
+      mods = openkh.mods if openkh.mods is not None else openkh.folder / 'mods'
+      if mods.exists():
+         for game in mods.iterdir():
             if not game.is_dir():
                continue
             for root, folders, _files in game.walk():
