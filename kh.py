@@ -78,9 +78,9 @@ def update(settings: Settings, settings_path: pathlib.Path):
 
    symlinks = Symlinks()
    environment = get_environment(settings)
-   
+
    check_saves(symlinks, environment, settings)
-   
+
    if (game := settings.games.kh15_25) is not None:
       folder = game.get_workspace()
       symlinks.remove(folder / 'reFined.cfg')
@@ -116,21 +116,21 @@ def update(settings: Settings, settings_path: pathlib.Path):
       symlinks.remove(mods)
       if (kh3 := settings.mods.kh3) is not None:
          symlinks.make(mods, kh3.folder, is_dir=True)
-   
+
    if (openkh := settings.mods.openkh) is not None:
       openkh_settings = check_openkh(openkh, symlinks, environment, settings, settings_path, check_updates=True)
    else:
       openkh_settings = None
-   
+
    if (luabackend := settings.mods.luabackend) is not None:
       check_luabackend(luabackend, openkh_settings, symlinks, environment, settings, settings_path)
-   
+
    if (randomizer := settings.mods.randomizer) is not None:
       check_randomizer(randomizer, settings, settings_path)
-   
+
    if (openkh := settings.mods.openkh) is not None and openkh_settings is not None:
       mod_games(openkh, openkh_settings, environment, settings, settings_path)
-   
+
    if (game := settings.games.kh15_25) is not None:
       make_launch(game, game.kh1, environment, settings, lua=True, openkh=True, refined=False, kh3=False)
       make_launch(game, game.kh2, environment, settings, lua=True, openkh=True, refined=True, kh3=False)
@@ -143,7 +143,7 @@ def update(settings: Settings, settings_path: pathlib.Path):
       make_launch(game, game.kh3, environment, settings, lua=False, openkh=False, refined=False, kh3=True)
    if (game := settings.games.khmom) is not None:
       make_launch(game, game.khmom, environment, settings, lua=False, openkh=False, refined=False, kh3=False)
-      
+
    symlinks.commit()
 
 def initial_run(settings_path: pathlib.Path) -> Settings:
@@ -246,6 +246,7 @@ def initial_run(settings_path: pathlib.Path) -> Settings:
          refined = None if not refined else Refined(
             folder = extra_folder / 'refined',
             settings = extra_folder / 'refined/reFined.cfg',
+            disabled_modules = []
          ),
          randomizer = None if not randomizer else Randomizer(
             folder = extra_folder / 'randomizer',
@@ -345,16 +346,16 @@ class Environment:
 class WindowsEnvironment(Environment):
    def user_folder(self, game: KhGame) -> pathlib.Path:
       return pathlib.Path.home()
-   
+
    def convert_path(self, game: KhGame, path: pathlib.Path) -> pathlib.PureWindowsPath:
       return pathlib.PureWindowsPath(path)
-   
+
    def convert_path_back(self, game: KhGame, path: pathlib.PureWindowsPath) -> pathlib.Path:
       return pathlib.Path(path)
-   
+
    def run_program(self, game: KhGame, args: list[str]) -> subprocess.CompletedProcess:
       return subprocess.run(args, check=True)
-   
+
    def make_launch(self, file: typing.TextIO, directory: pathlib.PureWindowsPath, exe: pathlib.PureWindowsPath, env: dict[str, str]):
       file.writelines([
          '@echo off',
@@ -362,7 +363,7 @@ class WindowsEnvironment(Environment):
          *[f'set {key}={mslex.quote(value)}' for key, value in env.items()],
          f'{mslex.quote(str(exe))}\n',
       ])
-   
+
    @classmethod
    def is_linux(cls) -> bool:
       return False
@@ -370,11 +371,11 @@ class WindowsEnvironment(Environment):
 class LinuxEnvironment(Environment):
    def __init__(self, runtime: WineRuntime):
       self.runtime = runtime
-   
+
    def user_folder(self, game: KhGame) -> pathlib.Path:
       assert game.wineprefix is not None
       return game.wineprefix / 'drive_c/users' / os.getlogin()
-   
+
    def wine_env(self, game: KhGame) -> dict[str, str]:
       assert game.wineprefix is not None
       env: dict[str, str] = dict(os.environ)
@@ -382,7 +383,7 @@ class LinuxEnvironment(Environment):
       if self.runtime == 'umu':
          env['PROTONPATH'] = 'GE-Proton'
       return env
-   
+
    def convert_path(self, game: KhGame, path: pathlib.Path) -> pathlib.PureWindowsPath:
       result = subprocess.run(
          ['winepath', '--windows', str(path)],
@@ -392,7 +393,7 @@ class LinuxEnvironment(Environment):
          env=self.wine_env(game)
       ).stdout.decode('utf-8').rstrip('\n')
       return pathlib.PureWindowsPath(result)
-   
+
    def convert_path_back(self, game: KhGame, path: pathlib.PureWindowsPath) -> pathlib.Path:
       result = subprocess.run(
          ['winepath', '--unix', str(path)],
@@ -411,7 +412,7 @@ class LinuxEnvironment(Environment):
          check=True,
          env=self.wine_env(game)
       )
-   
+
    def make_launch(self, file: typing.TextIO, directory: pathlib.PureWindowsPath, exe: pathlib.PureWindowsPath, env: dict[str, str]):
       env_str = ' '.join(f'{key}={shlex.quote(value)}' for key, value in env.items())
       entry = {'wine': 'wine', 'umu': 'umu-run'}[self.runtime]
@@ -419,7 +420,7 @@ class LinuxEnvironment(Environment):
          '#!/bin/sh\n',
          f'{env_str} exec {entry} start /wait /b /d {shlex.quote(str(directory))} {shlex.quote(str(exe))}\n',
       ])
-   
+
    @classmethod
    def is_linux(cls) -> bool:
       return True
@@ -673,10 +674,10 @@ def get_winetricks(prefix: pathlib.Path) -> list[str]:
 class Symlinks:
    def __init__(self):
       self.remove_symlinks: set[pathlib.Path] = set()
-   
+
    def remove(self, path: pathlib.Path):
       self.remove_symlinks.add(path)
-   
+
    def make(self, new: pathlib.Path, existing: pathlib.Path, is_dir: bool):
       if new in self.remove_symlinks:
          self.remove_symlinks.remove(new)
@@ -692,7 +693,7 @@ class Symlinks:
          new.symlink_to(existing, target_is_directory=is_dir)
       else:
          print(f'Can\'t create symlink in \'{new}\' pointing to \'{existing}\', file already exists!')
-   
+
    def commit(self):
       for path in self.remove_symlinks:
          if path.is_symlink():
@@ -795,8 +796,6 @@ def check_openkh(openkh: OpenKh, symlinks: Symlinks, environment: Environment, s
       mgr_data = yaml.load(mods_file, yaml.CLoader)
    changed = False
    if openkh.mods is not None:
-      # until https://github.com/OpenKH/OpenKh/issues/1202 is fixed, we may need to use symlinks instead
-      # still, users that manually customize it will get broken behavior both here and in openkh
       changed |= set_data(mgr_data, 'modCollectionPath', str(environment.convert_path(use_game, openkh.mods)))
       changed |= set_data(mgr_data, 'modCollectionsPath', str(environment.convert_path(use_game, openkh.mods / 'collections')))
       changed |= set_data(mgr_data, 'gameModPath', str(environment.convert_path(use_game, openkh.mods / 'output')))
@@ -809,7 +808,7 @@ def check_openkh(openkh: OpenKh, symlinks: Symlinks, environment: Environment, s
    if changed:
       with open(manager_settings, 'w', encoding='utf-8') as mods_file:
          yaml.dump(mgr_data, mods_file)
-   
+
    if openkh.panacea is not None:
       print('Checking panacea')
       for game in settings.games.get_classic():
@@ -844,7 +843,7 @@ def check_openkh(openkh: OpenKh, symlinks: Symlinks, environment: Environment, s
       if changed:
          with open(openkh.panacea.settings, 'w', encoding='utf-8') as mods_file:
             mods_file.writelines([f'{key}={value}\n' for key, value in pana_data.items()])
-   
+
    return mgr_data
 
 def mod_games(openkh: OpenKh, openkh_settings: dict[str, typing.Any], environment: Environment, settings: Settings, settings_path: pathlib.Path):
@@ -857,7 +856,7 @@ def mod_games(openkh: OpenKh, openkh_settings: dict[str, typing.Any], environmen
             if not game.is_dir():
                continue
             for root, folders, _files in game.walk():
-               if not '.git' in folders:
+               if '.git' not in folders:
                   continue
                print(f'Checking for updates for mod {root.name}')
                old_hash = subprocess.run(
@@ -917,6 +916,7 @@ def mod_game(game: KhGame, ids: dict[str, str], rebuild: set[str], openkh: OpenK
                      '--output', str(data_folder / gameid),
                      str(environment.convert_path(game, root / file)),
                   ])
+                  pathlib.Path('OpenKh.Command.IdxImg.log').unlink(missing_ok=True)
          for entry in (game_data_local / 'original').iterdir():
             shutil.move(entry, game_data_local)
       print(f'Building {gameid} mods')
@@ -930,6 +930,13 @@ def mod_game(game: KhGame, ids: dict[str, str], rebuild: set[str], openkh: OpenK
          '--mods_folder', str(mod_in / gameid),
          '--game_data', str(data_folder / gameid),
       ])
+      pathlib.Path('OpenKh.Command.IdxImg.log').unlink(missing_ok=True)
+      if (refined := settings.mods.refined) is not None and len(refined.disabled_modules) > 0:
+         modules_folder = environment.convert_path_back(game, mod_out) / gameid / 'dll' / 'modules'
+         if modules_folder.exists():
+            for entry in refined.disabled_modules:
+               module_path = modules_folder / f'ModuleRF-{entry}.dll'
+               module_path.unlink(missing_ok=True)
       if openkh.panacea is None:
          print(f'Patching {gameid} mods')
          backup_folder(image_source, image_backup)
@@ -940,6 +947,7 @@ def mod_game(game: KhGame, ids: dict[str, str], rebuild: set[str], openkh: OpenK
             '--output_folder', str(environment.convert_path(game, image_source)),
             '--source_folder', str(environment.convert_path(game, image_backup)),
          ])
+         pathlib.Path('OpenKh.Command.IdxImg.log').unlink(missing_ok=True)
 
    if latest_modified is not None and (openkh.last_build is None or latest_modified > openkh.last_build):
       openkh.last_build = latest_modified
@@ -1055,7 +1063,7 @@ def download_latest(
    extract_filter: typing.Callable[[pathlib.Path], bool] | None,
    destination_folder: pathlib.Path
 ) -> datetime.datetime | None:
-   response = requests.get(url, timeout=10)
+   response = requests.get(url, timeout=20)
    if response.status_code != 200:
       print(f'Error {response.status_code}!')
       try:
@@ -1085,7 +1093,7 @@ def download_latest(
       asset_date = datetime.datetime.fromisoformat(asset['updated_at'].replace('Z', '+00:00'))
       if last_date is None or asset_date > last_date or not destination_folder.exists():
          print(f'Downloading update: {release["tag_name"]}')
-         response = requests.get(asset['browser_download_url'], timeout=10)
+         response = requests.get(asset['browser_download_url'], timeout=20)
          if response.status_code != 200:
             print(f'Error {response.status_code}!')
             print(response.text)

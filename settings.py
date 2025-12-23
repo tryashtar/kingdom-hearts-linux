@@ -4,6 +4,7 @@ import dataclasses
 import typing
 import pathlib
 import datetime
+import yaml
 
 @dataclasses.dataclass
 class LaunchExe:
@@ -74,7 +75,7 @@ class KhGame:
    def umu_id(cls) -> str: pass
    @abc.abstractmethod
    def get_exes(self) -> list[LaunchExe]: pass
-   
+
    def get_workspace(self):
       if self.workspace is not None:
          return self.workspace
@@ -86,7 +87,7 @@ class Kh1525(KhGame):
    kh2: LaunchKh2
    khrecom: LaunchKhRecom
    khbbs: LaunchKhBbs
-   
+
    @classmethod
    def saves_folder(cls) -> pathlib.PurePath:
       return pathlib.PurePath('KINGDOM HEARTS HD 1.5+2.5 ReMIX')
@@ -94,7 +95,7 @@ class Kh1525(KhGame):
    @classmethod
    def umu_id(cls) -> str:
       return 'umu-2552430'
-   
+
    def get_exes(self) -> list[LaunchExe]:
       return [game for game in [self.kh1, self.kh2, self.khrecom, self.khbbs] if game is not None]
 
@@ -102,45 +103,45 @@ class Kh1525(KhGame):
 class Kh28(KhGame):
    khddd: LaunchKhDdd
    kh02: LaunchKh02
-   
+
    @classmethod
    def saves_folder(cls) -> pathlib.PurePath:
       return pathlib.PurePath('KINGDOM HEARTS HD 2.8 Final Chapter Prologue')
-   
+
    @classmethod
    def umu_id(cls) -> str:
       return 'umu-2552430'
-   
+
    def get_exes(self) -> list[LaunchExe]:
       return [game for game in [self.khddd, self.kh02] if game is not None]
 
 @dataclasses.dataclass
 class Kh3(KhGame):
    kh3: LaunchKh3
-   
+
    @classmethod
    def saves_folder(cls) -> pathlib.PurePath:
       return pathlib.PurePath('KINGDOM HEARTS III')
-   
+
    @classmethod
    def umu_id(cls) -> str:
       return 'umu-2552450'
-   
+
    def get_exes(self) -> list[LaunchExe]:
       return [game for game in [self.kh3] if game is not None]
 
 @dataclasses.dataclass
 class KhMom(KhGame):
    khmom: LaunchKhMom
-   
+
    @classmethod
    def saves_folder(cls) -> pathlib.PurePath:
       return pathlib.PurePath('KINGDOM HEARTS Melody of Memory')
-   
+
    @classmethod
    def umu_id(cls) -> str:
       return 'umu-2552430'
-   
+
    def get_exes(self) -> list[LaunchExe]:
       return [game for game in [self.khmom] if game is not None]
 
@@ -150,7 +151,7 @@ class Games:
    kh28: typing.Optional[Kh28]
    kh3: typing.Optional[Kh3]
    khmom: typing.Optional[KhMom]
-   
+
    def get_all(self) -> list[KhGame]:
       return [game for game in [self.kh15_25, self.kh28, self.kh3, self.khmom] if game is not None]
 
@@ -182,6 +183,7 @@ class Luabackend:
 class Refined:
    folder: pathlib.Path
    settings: pathlib.Path
+   disabled_modules: list[str]
 
 @dataclasses.dataclass
 class Randomizer:
@@ -211,10 +213,10 @@ class Settings:
    runtime: typing.Optional[WineRuntime]
    games: Games
    mods: Mods
-   
+
 def save_settings(settings: Settings, path: pathlib.Path):
    with open(path, 'w', encoding='utf-8') as data_file:
-      data = mashumaro.codecs.yaml.encode(settings, Settings)
+      data = mashumaro.codecs.yaml.YAMLEncoder(Settings, post_encoder_func=lambda x: yaml.dump(x, sort_keys=False)).encode(settings)
       assert isinstance(data, str)
       data_file.write(data)
 
